@@ -105,3 +105,21 @@ resource "aws_api_gateway_deployment" "example_lambda_try_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   stage_name  = "v1"
 }
+
+
+resource "aws_dynamodb_table" "example" {
+  name         = "example-table"
+  billing_mode = "PAY_PER_REQUEST"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  hash_key = "id"
+
+  tags = {
+    Name        = "example-table"
+    Environment = "dev"
+  }
+}
