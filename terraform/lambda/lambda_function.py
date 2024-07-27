@@ -1,37 +1,31 @@
-import sys
 import json
-from io import StringIO
+import boto3
+from uuid import uuid4
+
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('example-table')
 
 def lambda_handler(event, context):
-    # Get code from payload
-    code = event['answer']
-    test_code = code + '\nprint(sum(5,5))'
-    #zachytenie vystupu
-    buffer = StringIO()
-    sys.stdout = buffer
-    # Execute
-    try:
-        exec(test_code)
-    except:
-        return False
-    # Return 
-    sys.stdout = sys.stdout
-    # Check
-    if int(buffer.getvalue()) == 25:
+    # Generate a random item ID
+    item_id = str(uuid4())
+    item_name = "example_name"
+    item_description = "example_description"
+    random_value = "random_value"
 
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json"
-            },
-            "body": json.dumps({ "message": "true"})
-        }    
+    # Put item into DynamoDB table
+    table.put_item(
+        Item={
+            'id': item_id,
+            'name': item_name,
+            'description': item_description,
+            'value': random_value
+        }
+    )
 
     return {
         "statusCode": 200,
         "headers": {
             "Content-Type": "application/json"
         },
-        "body": json.dumps({ "message": "false"})
+        "body": json.dumps({ "message": "Item inserted successfully"})
     }
-   
