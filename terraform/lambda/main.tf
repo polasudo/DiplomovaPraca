@@ -79,6 +79,24 @@ resource "aws_lambda_function" "example_lambda_get_part" {
   }
 }
 
+# New Lambda function for PUT request
+resource "aws_lambda_function" "example_lambda_put_part" {
+  function_name = "example_lambda_put_part_lambda_function"
+  handler       = "lambda_put_function.lambda_handler"
+  runtime       = "python3.9"
+  role          = aws_iam_role.lambda_role_testing_part.arn
+
+  filename = "lambda_put_function.zip"
+
+  source_code_hash = filebase64sha256("lambda_put_function.zip")
+
+  environment {
+    variables = {
+      DYNAMODB_TABLE_NAME = "example-table"
+    }
+  }
+}
+
 resource "aws_api_gateway_rest_api" "example_lambda_try_part" {
   name        = "example_lambda_try_part_api"
   description = "example_lambda_try_part API Gateway for Lambda"
@@ -96,6 +114,12 @@ resource "aws_api_gateway_resource" "example_lambda_get_part" {
   path_part   = "get_example_lambda_try_part"
 }
 
+resource "aws_api_gateway_resource" "example_lambda_put_part" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  parent_id   = aws_api_gateway_rest_api.example_lambda_try_part.root_resource_id
+  path_part   = "put_example_lambda_try_part"
+}
+
 resource "aws_api_gateway_method" "example_lambda_try_part" {
   rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id   = aws_api_gateway_resource.example_lambda_try_part.id
@@ -107,6 +131,14 @@ resource "aws_api_gateway_method" "example_lambda_get_part" {
   rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id   = aws_api_gateway_resource.example_lambda_get_part.id
   http_method   = "GET"
+  authorization = "NONE"
+}
+
+# New API Gateway method for PUT request
+resource "aws_api_gateway_method" "example_lambda_put_part" {
+  rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id   = aws_api_gateway_resource.example_lambda_put_part.id
+  http_method   = "PUT"
   authorization = "NONE"
 }
 
@@ -130,6 +162,17 @@ resource "aws_api_gateway_integration" "example_lambda_get_part" {
   uri                     = aws_lambda_function.example_lambda_get_part.invoke_arn
 }
 
+# New API Gateway integration for PUT request
+resource "aws_api_gateway_integration" "example_lambda_put_part" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id = aws_api_gateway_resource.example_lambda_put_part.id
+  http_method = aws_api_gateway_method.example_lambda_put_part.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS"
+  uri                     = aws_lambda_function.example_lambda_put_part.invoke_arn
+}
+
 resource "aws_lambda_permission" "example_lambda_try_part" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
@@ -148,6 +191,16 @@ resource "aws_lambda_permission" "example_lambda_get_part" {
   source_arn = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_get_part.http_method}${aws_api_gateway_resource.example_lambda_get_part.path}"
 }
 
+# New Lambda permission for PUT request
+resource "aws_lambda_permission" "example_lambda_put_part" {
+  statement_id  = "AllowAPIGatewayInvokePut"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.example_lambda_put_part.function_name
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_put_part.http_method}${aws_api_gateway_resource.example_lambda_put_part.path}"
+}
+
 resource "aws_api_gateway_method_response" "respone_200" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_try_part.id
@@ -163,6 +216,18 @@ resource "aws_api_gateway_method_response" "get_response_200" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_get_part.id
   http_method = aws_api_gateway_method.example_lambda_get_part.http_method
+  status_code = "200"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+# New method response for PUT request
+resource "aws_api_gateway_method_response" "put_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id = aws_api_gateway_resource.example_lambda_put_part.id
+  http_method = aws_api_gateway_method.example_lambda_put_part.http_method
   status_code = "200"
 
   response_models = {
@@ -192,6 +257,18 @@ resource "aws_api_gateway_integration_response" "get_integration_response_200" {
   ]
 }
 
+# New integration response for PUT request
+resource "aws_api_gateway_integration_response" "put_integration_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id = aws_api_gateway_resource.example_lambda_put_part.id
+  http_method = aws_api_gateway_method.example_lambda_put_part.http_method
+  status_code = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.example_lambda_put_part
+  ]
+}
+
 resource "aws_api_gateway_deployment" "example_lambda_try_part" {
   depends_on = [
     aws_api_gateway_integration.example_lambda_try_part,
@@ -199,7 +276,10 @@ resource "aws_api_gateway_deployment" "example_lambda_try_part" {
     aws_api_gateway_integration_response.integration_response_200,
     aws_api_gateway_integration.example_lambda_get_part,
     aws_api_gateway_method_response.get_response_200,
-    aws_api_gateway_integration_response.get_integration_response_200
+    aws_api_gateway_integration_response.get_integration_response_200,
+    aws_api_gateway_integration.example_lambda_put_part,
+    aws_api_gateway_method_response.put_response_200,
+    aws_api_gateway_integration_response.put_integration_response_200
   ]
 
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
