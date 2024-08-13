@@ -7,27 +7,27 @@ const Navbar = () => {
     const toggleMenu = () => {
         setIsOpen(!isOpen);
     };
-    return (
 
+    return (
         <nav className="w-full bg-indigo-800 p-4">
             <div className="container mx-auto flex justify-between items-center">
-                <div className="text-white font-extrabold text-xl">Your Company</div>
-                <div className="hidden md:flex space-x-6">
-                    <a href="/" className="text-white hover:text-gray-300 transition-colors">
+                <div className="text-white font-extrabold text-2xl">Your Company</div>
+                <div className="hidden md:flex space-x-8">
+                    <a href="/" className="text-white hover:text-gray-300 transition-colors duration-300">
                         Home
                     </a>
-                    <a href="/tasks" className="text-white hover:text-gray-300 transition-colors">
+                    <a href="/tasks" className="text-white hover:text-gray-300 transition-colors duration-300">
                         Tasks
                     </a>
-
                 </div>
                 <div className="md:hidden">
                     <button
                         onClick={toggleMenu}
                         className="text-white focus:outline-none"
+                        aria-label="Toggle navigation"
                     >
                         <svg
-                            className="w-6 h-6"
+                            className="w-8 h-8"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -44,18 +44,12 @@ const Navbar = () => {
                 </div>
             </div>
             {isOpen && (
-                <div className="md:hidden flex flex-col mt-4 space-y-4">
-                    <a href="#home" className="text-white hover:text-gray-300 transition-colors">
+                <div className="md:hidden flex flex-col mt-4 space-y-2 bg-indigo-700 p-4 rounded-lg shadow-lg">
+                    <a href="/" className="text-white hover:text-gray-300 transition-colors duration-300">
                         Home
                     </a>
-                    <a href="#features" className="text-white hover:text-gray-300 transition-colors">
-                        Features
-                    </a>
-                    <a href="#about" className="text-white hover:text-gray-300 transition-colors">
-                        About
-                    </a>
-                    <a href="#contact" className="text-white hover:text-gray-300 transition-colors">
-                        Contact
+                    <a href="/tasks" className="text-white hover:text-gray-300 transition-colors duration-300">
+                        Tasks
                     </a>
                 </div>
             )}

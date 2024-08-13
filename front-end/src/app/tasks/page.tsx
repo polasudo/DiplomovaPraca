@@ -82,8 +82,8 @@ const Page = () => {
                             >
                                 <h2 className="text-2xl font-bold text-gray-800 mb-4">{item.name}</h2>
                                 <p className="text-gray-600">{item.description}</p>
-                                <button className="mt-6 bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-500 transition-colors duration-300">
-                                    Learn More
+                                <button className="mt-6 bg-red-800 text-white py-2 px-4 rounded-lg hover:bg-red-400 transition-colors duration-300">
+                                    Delete
                                 </button>
                             </div>
                         ))}

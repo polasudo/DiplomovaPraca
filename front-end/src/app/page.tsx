@@ -5,8 +5,9 @@ import Navbar from "../../components/Navbar";
 
 export default function Home() {
   return (
+    <>
+    <Navbar />
     <main className="flex min-h-screen flex-col items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-100 p-8">
-      <Navbar />
 
       {/* Hero Section */}
       <div
@@ -31,5 +32,6 @@ export default function Home() {
         <p>&copy; {new Date().getFullYear()} Your Company. All rights reserved.</p>
       </footer>
     </main>
+    </>
   );
 }
