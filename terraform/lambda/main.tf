@@ -22,7 +22,7 @@ resource "aws_iam_role" "lambda_role_testing_part" {
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
   name        = "lambda_dynamodb_policy"
   description = "Policy for Lambda to interact with DynamoDB"
-  policy      = jsonencode({
+  policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
@@ -77,7 +77,8 @@ resource "aws_lambda_function" "example_lambda_get_part" {
 
   environment {
     variables = {
-      DYNAMODB_TABLE_NAME = "example-table"
+      DYNAMODB_TABLE_NAME                  = "example-table"
+      example_lambda_try_part_ENV_VARIABLE = "dev"
     }
   }
 }
@@ -195,7 +196,7 @@ resource "aws_api_gateway_integration" "example_lambda_get_part" {
   resource_id = aws_api_gateway_resource.example_lambda_get_part.id
   http_method = aws_api_gateway_method.example_lambda_get_part.http_method
 
-  integration_http_method = "GET"
+  integration_http_method = "POST" # POST to invoke Lambda
   type                    = "AWS"
   uri                     = aws_lambda_function.example_lambda_get_part.invoke_arn
 }
@@ -205,7 +206,7 @@ resource "aws_api_gateway_integration" "example_lambda_put_part" {
   resource_id = aws_api_gateway_resource.example_lambda_put_part.id
   http_method = aws_api_gateway_method.example_lambda_put_part.http_method
 
-  integration_http_method = "PUT"
+  integration_http_method = "POST"
   type                    = "AWS"
   uri                     = aws_lambda_function.example_lambda_put_part.invoke_arn
 }
@@ -216,7 +217,7 @@ resource "aws_api_gateway_integration" "example_lambda_delete_part" {
   resource_id = aws_api_gateway_resource.example_lambda_delete_part.id
   http_method = aws_api_gateway_method.example_lambda_delete_part.http_method
 
-  integration_http_method = "DELETE"
+  integration_http_method = "POST"
   type                    = "AWS"
   uri                     = aws_lambda_function.example_lambda_delete_part.invoke_arn
 }
@@ -226,8 +227,7 @@ resource "aws_lambda_permission" "example_lambda_try_part" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.example_lambda_try_part.function_name
   principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_try_part.http_method}${aws_api_gateway_resource.example_lambda_try_part.path}"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_try_part.http_method}${aws_api_gateway_resource.example_lambda_try_part.path}"
 }
 
 resource "aws_lambda_permission" "example_lambda_get_part" {
@@ -235,8 +235,7 @@ resource "aws_lambda_permission" "example_lambda_get_part" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.example_lambda_get_part.function_name
   principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_get_part.http_method}${aws_api_gateway_resource.example_lambda_get_part.path}"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_get_part.http_method}${aws_api_gateway_resource.example_lambda_get_part.path}"
 }
 
 resource "aws_lambda_permission" "example_lambda_put_part" {
@@ -244,8 +243,7 @@ resource "aws_lambda_permission" "example_lambda_put_part" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.example_lambda_put_part.function_name
   principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_put_part.http_method}${aws_api_gateway_resource.example_lambda_put_part.path}"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_put_part.http_method}${aws_api_gateway_resource.example_lambda_put_part.path}"
 }
 
 # New Lambda permission for DELETE request
@@ -254,8 +252,7 @@ resource "aws_lambda_permission" "example_lambda_delete_part" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.example_lambda_delete_part.function_name
   principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_delete_part.http_method}${aws_api_gateway_resource.example_lambda_delete_part.path}"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_delete_part.http_method}${aws_api_gateway_resource.example_lambda_delete_part.path}"
 }
 
 resource "aws_api_gateway_method_response" "respone_200" {
@@ -390,15 +387,15 @@ resource "aws_dynamodb_table" "example" {
   hash_key = "id"
 
   global_secondary_index {
-    name               = "name-index"
-    hash_key           = "name"
-    projection_type    = "ALL"
+    name            = "name-index"
+    hash_key        = "name"
+    projection_type = "ALL"
   }
 
   global_secondary_index {
-    name               = "description-index"
-    hash_key           = "description"
-    projection_type    = "ALL"
+    name            = "description-index"
+    hash_key        = "description"
+    projection_type = "ALL"
   }
 
   tags = {
