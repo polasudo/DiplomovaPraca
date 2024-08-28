@@ -28,23 +28,16 @@ def lambda_handler(event, context):
 
         return {
             "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",  # CORS header
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type"
-            },
             "body": json.dumps({ "message": "Item inserted successfully", "id": item_id })
         }
 
     except Exception as e:
         return {
             "statusCode": 500,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",  # CORS header
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type"
-            },
             "body": json.dumps({ "error": str(e) })
         }
+
+
+# {
+#     "body": "{\"name\": \"Sample Item\", \"description\": \"This is a test item\", \"value\": \"12345\"}"
+# }

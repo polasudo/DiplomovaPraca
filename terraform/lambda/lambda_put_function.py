@@ -6,15 +6,63 @@ table = dynamodb.Table('example-table')
 
 def lambda_handler(event, context):
     try:
-        response = table.scan()
-        items = response.get('Items', [])
+        # Parse the body of the request
+        body = json.loads(event.get('body', '{}'))
+        
+        # Check if 'id' is provided in the request body
+        item_id = body.get('id')
+        if not item_id:
+            return {
+                "statusCode": 400,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "body": json.dumps({"error": "id is required to update an item"})
+            }
+        
+        # Update item attributes
+        update_expression = "set"
+        expression_attribute_values = {}
+        
+        if 'name' in body:
+            update_expression += " #name = :name,"
+            expression_attribute_values[":name"] = body['name']
+        if 'description' in body:
+            update_expression += " description = :description,"
+            expression_attribute_values[":description"] = body['description']
+        if 'value' in body:
+            update_expression += " #value = :value,"
+            expression_attribute_values[":value"] = body['value']
+        
+        # Remove the trailing comma from the update expression
+        update_expression = update_expression.rstrip(',')
+
+        # Define the attribute names to update
+        expression_attribute_names = {
+            "#name": "name",
+            "#value": "value"
+        }
+
+        # Perform the update operation
+        response = table.update_item(
+            Key={'id': item_id},
+            UpdateExpression=update_expression,
+            ExpressionAttributeValues=expression_attribute_values,
+            ExpressionAttributeNames=expression_attribute_names,
+            ReturnValues="UPDATED_NEW"
+        )
+        
         return {
             "statusCode": 200,
             "headers": {
                 "Content-Type": "application/json"
             },
-            "body": json.dumps(items)
+            "body": json.dumps({
+                "message": "Item updated successfully",
+                "updatedAttributes": response.get('Attributes')
+            })
         }
+    
     except Exception as e:
         return {
             "statusCode": 500,
