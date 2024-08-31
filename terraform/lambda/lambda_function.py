@@ -1,7 +1,7 @@
 import json
 import boto3
 from uuid import uuid4
-
+# POST
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table('example-table')
 
