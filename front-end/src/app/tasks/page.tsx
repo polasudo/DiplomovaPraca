@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import Navbar from "../../../components/Navbar";
+import Link from "next/link";
 
 const Page = () => {
   const [data, setData] = useState<
@@ -140,6 +141,11 @@ const Page = () => {
                 <button className="mt-6 bg-red-800 text-white py-2 px-4 rounded-lg hover:bg-red-400 transition-colors duration-300">
                   Delete
                 </button>
+                <Link href={`/tasks/${item.id}`}>
+                  <button className="mt-6 bg-red-800 text-white py-2 px-4 rounded-lg hover:bg-red-400 transition-colors duration-300">
+                    Detail
+                  </button>
+                </Link>
               </div>
             ))}
           </div>
