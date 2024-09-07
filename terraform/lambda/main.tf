@@ -2,7 +2,6 @@ provider "aws" {
   region = "eu-central-1"
 }
 
-# IAM Role for Lambda
 resource "aws_iam_role" "lambda_role_testing_part" {
   name = "lambda_role_testing_part"
 
@@ -10,8 +9,8 @@ resource "aws_iam_role" "lambda_role_testing_part" {
     Version = "2012-10-17"
     Statement = [
       {
-        Action = "sts:AssumeRole",
-        Effect = "Allow",
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
         Principal = {
           Service = "lambda.amazonaws.com"
         }
@@ -20,7 +19,6 @@ resource "aws_iam_role" "lambda_role_testing_part" {
   })
 }
 
-# IAM Policy for Lambda to interact with DynamoDB
 resource "aws_iam_policy" "lambda_dynamodb_policy" {
   name        = "lambda_dynamodb_policy"
   description = "Policy for Lambda to interact with DynamoDB"
@@ -33,7 +31,7 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           "dynamodb:UpdateItem",
           "dynamodb:GetItem",
           "dynamodb:Scan",
-          "dynamodb:DeleteItem"
+          "dynamodb:DeleteItem" # Added DeleteItem permission
         ],
         Effect   = "Allow",
         Resource = "arn:aws:dynamodb:eu-central-1:944769655596:table/example-table"
@@ -42,72 +40,59 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
   })
 }
 
-# Attach policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_dynamodb_policy_attach" {
   role       = aws_iam_role.lambda_role_testing_part.name
   policy_arn = aws_iam_policy.lambda_dynamodb_policy.arn
 }
 
-# POST Lambda function
-resource "aws_lambda_function" "example_lambda_post_part" {
-  function_name = "lambda_post_function"
-  handler       = "post.lambda_handler"
+# POST
+resource "aws_lambda_function" "example_lambda_try_part" {
+  function_name = "example_lambda_try_part_lambda_function"
+  handler       = "lambda_function.lambda_handler"
   runtime       = "python3.9"
   role          = aws_iam_role.lambda_role_testing_part.arn
 
-  filename = "post.zip"
-  source_code_hash = filebase64sha256("post.zip")
+  filename = "main.zip"
+
+  source_code_hash = filebase64sha256("main.zip")
 
   environment {
     variables = {
-      DYNAMODB_TABLE_NAME = "example-table"
+      example_lambda_try_part_ENV_VARIABLE = "dev"
+      DYNAMODB_TABLE_NAME                  = "example-table"
     }
   }
 }
 
-# GET all items Lambda function
+# GET
 resource "aws_lambda_function" "example_lambda_get_part" {
-  function_name = "lambda_get_function"
-  handler       = "get.lambda_handler"
+  function_name = "example_lambda_get_part_lambda_function"
+  handler       = "lambda_get_function.lambda_handler"
   runtime       = "python3.9"
   role          = aws_iam_role.lambda_role_testing_part.arn
 
-  filename = "get.zip"
-  source_code_hash = filebase64sha256("get.zip")
+  filename = "lambda_get_function.zip"
+
+  source_code_hash = filebase64sha256("lambda_get_function.zip")
 
   environment {
     variables = {
-      DYNAMODB_TABLE_NAME = "example-table"
+      DYNAMODB_TABLE_NAME                  = "example-table"
+      example_lambda_try_part_ENV_VARIABLE = "dev"
     }
   }
 }
 
-# GET by ID Lambda function
-resource "aws_lambda_function" "example_lambda_get_by_id_part" {
-  function_name = "lambda_get_by_id_function"
-  handler       = "get_by_id.lambda_handler"
-  runtime       = "python3.9"
-  role          = aws_iam_role.lambda_role_testing_part.arn
-
-  filename = "get_by_id.zip"
-  source_code_hash = filebase64sha256("get_by_id.zip")
-
-  environment {
-    variables = {
-      DYNAMODB_TABLE_NAME = "example-table"
-    }
-  }
-}
-
-# PUT Lambda function
+# PUT
 resource "aws_lambda_function" "example_lambda_put_part" {
-  function_name = "lambda_put_function"
-  handler       = "put.lambda_handler"
+  function_name = "example_lambda_put_part_lambda_function"
+  handler       = "lambda_put_function.lambda_handler"
   runtime       = "python3.9"
   role          = aws_iam_role.lambda_role_testing_part.arn
 
-  filename = "put.zip"
-  source_code_hash = filebase64sha256("put.zip")
+  filename = "lambda_put_function.zip"
+
+  source_code_hash = filebase64sha256("lambda_put_function.zip")
 
   environment {
     variables = {
@@ -116,15 +101,16 @@ resource "aws_lambda_function" "example_lambda_put_part" {
   }
 }
 
-# DELETE Lambda function
+# DELETE
 resource "aws_lambda_function" "example_lambda_delete_part" {
-  function_name = "lambda_delete_function"
-  handler       = "delete.lambda_handler"
+  function_name = "example_lambda_delete_part_lambda_function"
+  handler       = "lambda_delete_function.lambda_handler"
   runtime       = "python3.9"
   role          = aws_iam_role.lambda_role_testing_part.arn
 
-  filename = "delete.zip"
-  source_code_hash = filebase64sha256("delete.zip")
+  filename = "lambda_delete_function.zip"
+
+  source_code_hash = filebase64sha256("lambda_delete_function.zip")
 
   environment {
     variables = {
@@ -133,56 +119,46 @@ resource "aws_lambda_function" "example_lambda_delete_part" {
   }
 }
 
-# API Gateway REST API
 resource "aws_api_gateway_rest_api" "example_lambda_try_part" {
   name        = "example_lambda_try_part_api"
   description = "example_lambda_try_part API Gateway for Lambda"
 }
 
-# POST resource
-resource "aws_api_gateway_resource" "example_lambda_post_part" {
+# POST
+resource "aws_api_gateway_resource" "example_lambda_try_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   parent_id   = aws_api_gateway_rest_api.example_lambda_try_part.root_resource_id
-  path_part   = "post_example_lambda_try_part"
+  path_part   = "example_lambda_try_part"
 }
 
-# GET resource
+# GET
 resource "aws_api_gateway_resource" "example_lambda_get_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   parent_id   = aws_api_gateway_rest_api.example_lambda_try_part.root_resource_id
   path_part   = "get_example_lambda_try_part"
 }
 
-# GET by ID resource
-resource "aws_api_gateway_resource" "example_lambda_get_part_id" {
-  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
-  parent_id   = aws_api_gateway_resource.example_lambda_get_part.id
-  path_part   = "{id}"
-}
-
-# PUT resource
+# PUT
 resource "aws_api_gateway_resource" "example_lambda_put_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   parent_id   = aws_api_gateway_rest_api.example_lambda_try_part.root_resource_id
   path_part   = "put_example_lambda_try_part"
 }
 
-# DELETE resource
+# New API Gateway resource for DELETE request
 resource "aws_api_gateway_resource" "example_lambda_delete_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   parent_id   = aws_api_gateway_rest_api.example_lambda_try_part.root_resource_id
   path_part   = "delete_example_lambda_try_part"
 }
 
-# POST method
-resource "aws_api_gateway_method" "example_lambda_post_part" {
+resource "aws_api_gateway_method" "example_lambda_try_part" {
   rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
-  resource_id   = aws_api_gateway_resource.example_lambda_post_part.id
+  resource_id   = aws_api_gateway_resource.example_lambda_try_part.id
   http_method   = "POST"
   authorization = "NONE"
 }
 
-# GET all items method
 resource "aws_api_gateway_method" "example_lambda_get_part" {
   rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id   = aws_api_gateway_resource.example_lambda_get_part.id
@@ -190,19 +166,6 @@ resource "aws_api_gateway_method" "example_lambda_get_part" {
   authorization = "NONE"
 }
 
-# GET by ID method
-resource "aws_api_gateway_method" "example_lambda_get_part_id" {
-  rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
-  resource_id   = aws_api_gateway_resource.example_lambda_get_part_id.id
-  http_method   = "GET"
-  authorization = "NONE"
-
-  request_parameters = {
-    "method.request.path.id" = true
-  }
-}
-
-# PUT method
 resource "aws_api_gateway_method" "example_lambda_put_part" {
   rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id   = aws_api_gateway_resource.example_lambda_put_part.id
@@ -210,7 +173,7 @@ resource "aws_api_gateway_method" "example_lambda_put_part" {
   authorization = "NONE"
 }
 
-# DELETE method
+# New API Gateway method for DELETE request
 resource "aws_api_gateway_method" "example_lambda_delete_part" {
   rest_api_id   = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id   = aws_api_gateway_resource.example_lambda_delete_part.id
@@ -218,66 +181,84 @@ resource "aws_api_gateway_method" "example_lambda_delete_part" {
   authorization = "NONE"
 }
 
-# Integration for POST method
-resource "aws_api_gateway_integration" "example_lambda_post_part" {
+resource "aws_api_gateway_integration" "example_lambda_try_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
-  resource_id = aws_api_gateway_resource.example_lambda_post_part.id
-  http_method = aws_api_gateway_method.example_lambda_post_part.http_method
+  resource_id = aws_api_gateway_resource.example_lambda_try_part.id
+  http_method = aws_api_gateway_method.example_lambda_try_part.http_method
 
   integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.example_lambda_post_part.invoke_arn
+  type                    = "AWS"
+  uri                     = aws_lambda_function.example_lambda_try_part.invoke_arn
 }
 
-# Integration for GET method (all items)
 resource "aws_api_gateway_integration" "example_lambda_get_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_get_part.id
   http_method = aws_api_gateway_method.example_lambda_get_part.http_method
 
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
+  integration_http_method = "POST" # POST to invoke Lambda
+  type                    = "AWS"
   uri                     = aws_lambda_function.example_lambda_get_part.invoke_arn
 }
 
-# Integration for GET by ID method
-resource "aws_api_gateway_integration" "example_lambda_get_part_id" {
-  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
-  resource_id = aws_api_gateway_resource.example_lambda_get_part_id.id
-  http_method = aws_api_gateway_method.example_lambda_get_part_id.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.example_lambda_get_by_id_part.invoke_arn
-}
-
-# Integration for PUT method
 resource "aws_api_gateway_integration" "example_lambda_put_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_put_part.id
   http_method = aws_api_gateway_method.example_lambda_put_part.http_method
 
   integration_http_method = "POST"
-  type                    = "AWS_PROXY"
+  type                    = "AWS"
   uri                     = aws_lambda_function.example_lambda_put_part.invoke_arn
 }
 
-# Integration for DELETE method
+# New API Gateway integration for DELETE request
 resource "aws_api_gateway_integration" "example_lambda_delete_part" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_delete_part.id
   http_method = aws_api_gateway_method.example_lambda_delete_part.http_method
 
   integration_http_method = "POST"
-  type                    = "AWS_PROXY"
+  type                    = "AWS"
   uri                     = aws_lambda_function.example_lambda_delete_part.invoke_arn
 }
 
-# Method Response for POST
-resource "aws_api_gateway_method_response" "post_response_200" {
+resource "aws_lambda_permission" "example_lambda_try_part" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.example_lambda_try_part.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_try_part.http_method}${aws_api_gateway_resource.example_lambda_try_part.path}"
+}
+
+resource "aws_lambda_permission" "example_lambda_get_part" {
+  statement_id  = "AllowAPIGatewayInvokeGet"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.example_lambda_get_part.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_get_part.http_method}${aws_api_gateway_resource.example_lambda_get_part.path}"
+}
+
+resource "aws_lambda_permission" "example_lambda_put_part" {
+  statement_id  = "AllowAPIGatewayInvokePut"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.example_lambda_put_part.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_put_part.http_method}${aws_api_gateway_resource.example_lambda_put_part.path}"
+}
+
+# New Lambda permission for DELETE request
+resource "aws_lambda_permission" "example_lambda_delete_part" {
+  statement_id  = "AllowAPIGatewayInvokeDelete"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.example_lambda_delete_part.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.example_lambda_try_part.execution_arn}/*/${aws_api_gateway_method.example_lambda_delete_part.http_method}${aws_api_gateway_resource.example_lambda_delete_part.path}"
+}
+
+resource "aws_api_gateway_method_response" "respone_200" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
-  resource_id = aws_api_gateway_resource.example_lambda_post_part.id
-  http_method = aws_api_gateway_method.example_lambda_post_part.http_method
+  resource_id = aws_api_gateway_resource.example_lambda_try_part.id
+  http_method = aws_api_gateway_method.example_lambda_try_part.http_method
   status_code = "200"
 
   response_models = {
@@ -285,7 +266,6 @@ resource "aws_api_gateway_method_response" "post_response_200" {
   }
 }
 
-# Method Response for GET (all items)
 resource "aws_api_gateway_method_response" "get_response_200" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_get_part.id
@@ -297,19 +277,6 @@ resource "aws_api_gateway_method_response" "get_response_200" {
   }
 }
 
-# Method Response for GET by ID
-resource "aws_api_gateway_method_response" "get_by_id_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
-  resource_id = aws_api_gateway_resource.example_lambda_get_part_id.id
-  http_method = aws_api_gateway_method.example_lambda_get_part_id.http_method
-  status_code = "200"
-
-  response_models = {
-    "application/json" = "Empty"
-  }
-}
-
-# Method Response for PUT
 resource "aws_api_gateway_method_response" "put_response_200" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_put_part.id
@@ -321,7 +288,7 @@ resource "aws_api_gateway_method_response" "put_response_200" {
   }
 }
 
-# Method Response for DELETE
+# New method response for DELETE request
 resource "aws_api_gateway_method_response" "delete_response_200" {
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   resource_id = aws_api_gateway_resource.example_lambda_delete_part.id
@@ -333,21 +300,71 @@ resource "aws_api_gateway_method_response" "delete_response_200" {
   }
 }
 
-# API Gateway Deployment
+resource "aws_api_gateway_integration_response" "integration_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id = aws_api_gateway_resource.example_lambda_try_part.id
+  http_method = aws_api_gateway_method.example_lambda_try_part.http_method
+  status_code = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.example_lambda_try_part
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "get_integration_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id = aws_api_gateway_resource.example_lambda_get_part.id
+  http_method = aws_api_gateway_method.example_lambda_get_part.http_method
+  status_code = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.example_lambda_get_part
+  ]
+}
+
+resource "aws_api_gateway_integration_response" "put_integration_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id = aws_api_gateway_resource.example_lambda_put_part.id
+  http_method = aws_api_gateway_method.example_lambda_put_part.http_method
+  status_code = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.example_lambda_put_part
+  ]
+}
+
+# New integration response for DELETE request
+resource "aws_api_gateway_integration_response" "delete_integration_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
+  resource_id = aws_api_gateway_resource.example_lambda_delete_part.id
+  http_method = aws_api_gateway_method.example_lambda_delete_part.http_method
+  status_code = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.example_lambda_delete_part
+  ]
+}
+
 resource "aws_api_gateway_deployment" "example_lambda_try_part" {
   depends_on = [
-    aws_api_gateway_integration.example_lambda_post_part,
+    aws_api_gateway_integration.example_lambda_try_part,
+    aws_api_gateway_method_response.respone_200,
+    aws_api_gateway_integration_response.integration_response_200,
     aws_api_gateway_integration.example_lambda_get_part,
-    aws_api_gateway_integration.example_lambda_get_part_id,
+    aws_api_gateway_method_response.get_response_200,
+    aws_api_gateway_integration_response.get_integration_response_200,
     aws_api_gateway_integration.example_lambda_put_part,
-    aws_api_gateway_integration.example_lambda_delete_part
+    aws_api_gateway_method_response.put_response_200,
+    aws_api_gateway_integration_response.put_integration_response_200,
+    aws_api_gateway_integration.example_lambda_delete_part,
+    aws_api_gateway_method_response.delete_response_200,
+    aws_api_gateway_integration_response.delete_integration_response_200
   ]
 
   rest_api_id = aws_api_gateway_rest_api.example_lambda_try_part.id
   stage_name  = "v1"
 }
 
-# DynamoDB Table
 resource "aws_dynamodb_table" "example" {
   name         = "example-table"
   billing_mode = "PAY_PER_REQUEST"
