@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import Navbar from "../../../../components/Navbar";
 
 const Page = () => {
+  const url = process.env.AWS_URL
   const router = useRouter();
   const { id } = router.query; // Extract task ID from the URL
   const [task, setTask] = useState({ name: "", description: "", value: "" });
@@ -14,7 +15,7 @@ const Page = () => {
   useEffect(() => {
     if (id) {
       fetch(
-        "https://ow522u3m10.execute-api.eu-central-1.amazonaws.com/v1/get_example_lambda_try_part",
+        `${url}/get_example_lambda_try_part`,
         {
           method: "POST",
           headers: {
@@ -53,7 +54,7 @@ const Page = () => {
       };
 
       const response = await fetch(
-        "https://ow522u3m10.execute-api.eu-central-1.amazonaws.com/v1/update_task",
+        `${url}/update_task`,
         {
           method: "PUT",
           headers: {

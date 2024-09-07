@@ -4,6 +4,7 @@ import Navbar from "../../../components/Navbar";
 import Link from "next/link";
 
 const Page = () => {
+  const url = process.env.AWS_URL
   const [data, setData] = useState<
     { id: string; name: string; description: string; value: string }[]
   >([]);
@@ -15,7 +16,7 @@ const Page = () => {
 
   useEffect(() => {
     fetch(
-      "https://ow522u3m10.execute-api.eu-central-1.amazonaws.com/v1/get_example_lambda_try_part"
+      `${url}/get_example_lambda_try_part`
     )
       .then((response) => response.json())
       .then((json) => {
@@ -41,7 +42,7 @@ const Page = () => {
 
     try {
       const response = await fetch(
-        "https://ow522u3m10.execute-api.eu-central-1.amazonaws.com/v1/example_lambda_try_part",
+        `${url}/example_lambda_try_part`,
         {
           method: "POST",
           headers: {
