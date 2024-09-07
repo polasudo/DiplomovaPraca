@@ -6,14 +6,12 @@ table = dynamodb.Table('example-table')
 
 def lambda_handler(event, context):
     try:
-        # Parse the body of the request
-        body = json.loads(event.get('body', '{}'))
-        
-        # Check if an 'id' is provided in the request body
-        item_id = body.get('id')
+        # Check if 'id' is present in path parameters
+        path_parameters = event.get('pathParameters')
+        item_id = path_parameters.get('id') if path_parameters else None
         
         if item_id:
-            # If 'id' is provided, get the specific item from the table
+            # Fetch a single item if 'id' is provided
             response = table.get_item(Key={'id': item_id})
             item = response.get('Item')
 
@@ -34,7 +32,7 @@ def lambda_handler(event, context):
                     "body": json.dumps({"message": "Item not found"})
                 }
         else:
-            # If no 'id' is provided, scan the entire table
+            # If no 'id' is provided, return all items
             response = table.scan()
             items = response.get('Items', [])
             return {
@@ -44,11 +42,12 @@ def lambda_handler(event, context):
                 },
                 "body": json.dumps(items)
             }
+
     except Exception as e:
         return {
             "statusCode": 500,
             "headers": {
-                        "Content-Type": "application/json"
-                    },
+                "Content-Type": "application/json"
+            },
             "body": json.dumps({"error": str(e)})
         }

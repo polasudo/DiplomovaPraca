@@ -1,16 +1,17 @@
 import json
+import os
 import boto3
 
+# Fetch the table name from the environment variable
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table('example-table')
+table_name = 'example-table'
+table = dynamodb.Table(table_name)
 
 def lambda_handler(event, context):
     try:
-        # Parse the body of the request
         body = json.loads(event.get('body', '{}'))
-        
-        # Check if 'id' is provided in the request body
         item_id = body.get('id')
+
         if not item_id:
             return {
                 "statusCode": 400,
@@ -19,14 +20,12 @@ def lambda_handler(event, context):
                 },
                 "body": json.dumps({"error": "id is required to delete an item"})
             }
-        
-        # Perform the delete operation
+
         response = table.delete_item(
             Key={'id': item_id},
             ReturnValues="ALL_OLD"
         )
-        
-        # Check if the item was actually deleted
+
         if 'Attributes' in response:
             return {
                 "statusCode": 200,
@@ -46,7 +45,7 @@ def lambda_handler(event, context):
                 },
                 "body": json.dumps({"error": "Item not found"})
             }
-    
+
     except Exception as e:
         return {
             "statusCode": 500,

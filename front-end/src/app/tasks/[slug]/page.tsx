@@ -31,7 +31,7 @@ const Page = () => {
         })
         .catch((error) => console.error("Error fetching task data:", error));
     }
-  }, [id]);
+  }, [id, url]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
