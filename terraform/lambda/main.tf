@@ -59,7 +59,7 @@ resource "aws_lambda_function" "post_function" {
   environment {
     variables = {
       post_function_ENV_VARIABLE = "dev"
-      DYNAMODB_TABLE_NAME                  = "example-table"
+      DYNAMODB_TABLE_NAME        = "example-table"
     }
   }
 }
@@ -85,7 +85,7 @@ resource "aws_lambda_function" "get_function" {
 
 # GET BY ID
 resource "aws_lambda_function" "get_by_id_function" {
-  function_name = "get_by_id_function_function"
+  function_name = "get_by_id"
   handler       = "get_by_id.lambda_handler"
   runtime       = "python3.9"
   role          = aws_iam_role.lambda_role_testing_part.arn
@@ -137,23 +137,27 @@ resource "aws_lambda_function" "delete_function" {
   }
 }
 
-resource "aws_api_gateway_rest_api" "post_function" {
-  name        = "post_function_api"
-  description = "post_function API Gateway for Lambda"
+resource "aws_api_gateway_rest_api" "lambda_api" {
+  name        = "API Gateway for Lambda"
+  description = "API Gateway for Lambda"
 }
+
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////RESOURCE/////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
 
 # POST
 resource "aws_api_gateway_resource" "post_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
-  parent_id   = aws_api_gateway_rest_api.post_function.root_resource_id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  parent_id   = aws_api_gateway_rest_api.lambda_api.root_resource_id
   path_part   = "post_function"
 }
 
 # GET
 resource "aws_api_gateway_resource" "get_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
-  parent_id   = aws_api_gateway_rest_api.post_function.root_resource_id
-  path_part   = "get_post_function"
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  parent_id   = aws_api_gateway_rest_api.lambda_api.root_resource_id
+  path_part   = "get_function"
 }
 
 # GET BY ID
@@ -164,71 +168,98 @@ resource "aws_api_gateway_resource" "get_by_id_function" {
 }
 # PUT
 resource "aws_api_gateway_resource" "put_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
-  parent_id   = aws_api_gateway_rest_api.post_function.root_resource_id
-  path_part   = "put_post_function"
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  parent_id   = aws_api_gateway_rest_api.lambda_api.root_resource_id
+  path_part   = "put_function"
 }
 
 # New API Gateway resource for DELETE request
 resource "aws_api_gateway_resource" "delete_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
-  parent_id   = aws_api_gateway_rest_api.post_function.root_resource_id
-  path_part   = "delete_post_function"
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  parent_id   = aws_api_gateway_rest_api.lambda_api.root_resource_id
+  path_part   = "delete_function"
 }
 
-resource "aws_api_gateway_method" "post_function" {
-  rest_api_id   = aws_api_gateway_rest_api.post_function.id
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////METHODS//////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+
+resource "aws_api_gateway_method" "post_function_method" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
   resource_id   = aws_api_gateway_resource.post_function.id
   http_method   = "POST"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_method" "get_function" {
-  rest_api_id   = aws_api_gateway_rest_api.post_function.id
+resource "aws_api_gateway_method" "get_function_method" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
   resource_id   = aws_api_gateway_resource.get_function.id
   http_method   = "GET"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_method" "put_function" {
-  rest_api_id   = aws_api_gateway_rest_api.post_function.id
+# GET by ID Method
+resource "aws_api_gateway_method" "get_by_id_method" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
+  resource_id   = aws_api_gateway_resource.get_by_id_function.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_method" "put_function_method" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
   resource_id   = aws_api_gateway_resource.put_function.id
   http_method   = "PUT"
   authorization = "NONE"
 }
 
 # New API Gateway method for DELETE request
-resource "aws_api_gateway_method" "delete_function" {
-  rest_api_id   = aws_api_gateway_rest_api.post_function.id
+resource "aws_api_gateway_method" "delete_function_method" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
   resource_id   = aws_api_gateway_resource.delete_function.id
   http_method   = "DELETE"
   authorization = "NONE"
 }
 
-resource "aws_api_gateway_integration" "post_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////INTEGRATION//////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+
+resource "aws_api_gateway_integration" "post_function_integration" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.post_function.id
-  http_method = aws_api_gateway_method.post_function.http_method
+  http_method = aws_api_gateway_method.post_function_method.http_method
 
   integration_http_method = "POST"
   type                    = "AWS"
   uri                     = aws_lambda_function.post_function.invoke_arn
 }
 
-resource "aws_api_gateway_integration" "get_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+resource "aws_api_gateway_integration" "get_function_integration" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.get_function.id
-  http_method = aws_api_gateway_method.get_function.http_method
+  http_method = aws_api_gateway_method.get_function_method.http_method
 
   integration_http_method = "POST" # POST to invoke Lambda
   type                    = "AWS"
   uri                     = aws_lambda_function.get_function.invoke_arn
 }
 
-resource "aws_api_gateway_integration" "put_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+# GET by ID Integration (connects API Gateway to Lambda)
+resource "aws_api_gateway_integration" "get_by_id_integration" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  resource_id = aws_api_gateway_resource.get_by_id_function.id
+  http_method = aws_api_gateway_method.get_by_id_method.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS"
+  uri                     = aws_lambda_function.get_by_id_function.invoke_arn
+}
+
+resource "aws_api_gateway_integration" "put_function_integration" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.put_function.id
-  http_method = aws_api_gateway_method.put_function.http_method
+  http_method = aws_api_gateway_method.put_function_method.http_method
 
   integration_http_method = "POST"
   type                    = "AWS"
@@ -236,53 +267,70 @@ resource "aws_api_gateway_integration" "put_function" {
 }
 
 # New API Gateway integration for DELETE request
-resource "aws_api_gateway_integration" "delete_function" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+resource "aws_api_gateway_integration" "delete_function_integration" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.delete_function.id
-  http_method = aws_api_gateway_method.delete_function.http_method
+  http_method = aws_api_gateway_method.delete_function_method.http_method
 
   integration_http_method = "POST"
   type                    = "AWS"
   uri                     = aws_lambda_function.delete_function.invoke_arn
 }
 
-resource "aws_lambda_permission" "post_function" {
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////PERMISSIONS//////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+
+resource "aws_lambda_permission" "post_function_permission" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.post_function.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.post_function.execution_arn}/*/${aws_api_gateway_method.post_function.http_method}${aws_api_gateway_resource.post_function.path}"
+  source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/${aws_api_gateway_method.post_function_method.http_method}${aws_api_gateway_resource.post_function.path}"
 }
 
-resource "aws_lambda_permission" "get_function" {
+resource "aws_lambda_permission" "get_function_permission" {
   statement_id  = "AllowAPIGatewayInvokeGet"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.get_function.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.post_function.execution_arn}/*/${aws_api_gateway_method.get_function.http_method}${aws_api_gateway_resource.get_function.path}"
+  source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/${aws_api_gateway_method.get_function_method.http_method}${aws_api_gateway_resource.get_function.path}"
 }
 
-resource "aws_lambda_permission" "put_function" {
+# GET by ID Lambda permission (allow API Gateway to invoke Lambda)
+resource "aws_lambda_permission" "get_by_id_permission" {
+  statement_id  = "AllowAPIGatewayInvokeGetByID"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.get_by_id_function.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/${aws_api_gateway_method.get_by_id_method.http_method}${aws_api_gateway_resource.get_by_id_function.path}"
+}
+
+resource "aws_lambda_permission" "put_function_permission" {
   statement_id  = "AllowAPIGatewayInvokePut"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.put_function.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.post_function.execution_arn}/*/${aws_api_gateway_method.put_function.http_method}${aws_api_gateway_resource.put_function.path}"
+  source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/${aws_api_gateway_method.put_function_method.http_method}${aws_api_gateway_resource.put_function.path}"
 }
 
 # New Lambda permission for DELETE request
-resource "aws_lambda_permission" "delete_function" {
+resource "aws_lambda_permission" "delete_function_permission" {
   statement_id  = "AllowAPIGatewayInvokeDelete"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.delete_function.function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.post_function.execution_arn}/*/${aws_api_gateway_method.delete_function.http_method}${aws_api_gateway_resource.delete_function.path}"
+  source_arn    = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/${aws_api_gateway_method.delete_function_method.http_method}${aws_api_gateway_resource.delete_function.path}"
 }
 
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////RESPONSES////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+
 resource "aws_api_gateway_method_response" "respone_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.post_function.id
-  http_method = aws_api_gateway_method.post_function.http_method
+  http_method = aws_api_gateway_method.post_function_method.http_method
   status_code = "200"
 
   response_models = {
@@ -291,9 +339,21 @@ resource "aws_api_gateway_method_response" "respone_200" {
 }
 
 resource "aws_api_gateway_method_response" "get_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.get_function.id
-  http_method = aws_api_gateway_method.get_function.http_method
+  http_method = aws_api_gateway_method.get_function_method.http_method
+  status_code = "200"
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+# GET by ID Method Response
+resource "aws_api_gateway_method_response" "get_by_id_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  resource_id = aws_api_gateway_resource.get_by_id_function.id
+  http_method = aws_api_gateway_method.get_by_id_method.http_method
   status_code = "200"
 
   response_models = {
@@ -302,9 +362,9 @@ resource "aws_api_gateway_method_response" "get_response_200" {
 }
 
 resource "aws_api_gateway_method_response" "put_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.put_function.id
-  http_method = aws_api_gateway_method.put_function.http_method
+  http_method = aws_api_gateway_method.put_function_method.http_method
   status_code = "200"
 
   response_models = {
@@ -314,9 +374,9 @@ resource "aws_api_gateway_method_response" "put_response_200" {
 
 # New method response for DELETE request
 resource "aws_api_gateway_method_response" "delete_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.delete_function.id
-  http_method = aws_api_gateway_method.delete_function.http_method
+  http_method = aws_api_gateway_method.delete_function_method.http_method
   status_code = "200"
 
   response_models = {
@@ -324,68 +384,92 @@ resource "aws_api_gateway_method_response" "delete_response_200" {
   }
 }
 
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////INTEGRATION RESPONSES////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+
 resource "aws_api_gateway_integration_response" "integration_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.post_function.id
-  http_method = aws_api_gateway_method.post_function.http_method
+  http_method = aws_api_gateway_method.post_function_method.http_method
   status_code = "200"
 
   depends_on = [
-    aws_api_gateway_integration.post_function
+    aws_api_gateway_integration.post_function_integration
   ]
 }
 
 resource "aws_api_gateway_integration_response" "get_integration_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.get_function.id
-  http_method = aws_api_gateway_method.get_function.http_method
+  http_method = aws_api_gateway_method.get_function_method.http_method
   status_code = "200"
 
   depends_on = [
-    aws_api_gateway_integration.get_function
+    aws_api_gateway_integration.get_function_integration
   ]
 }
 
-resource "aws_api_gateway_integration_response" "put_integration_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
-  resource_id = aws_api_gateway_resource.put_function.id
-  http_method = aws_api_gateway_method.put_function.http_method
+# GET by ID Integration Response
+resource "aws_api_gateway_integration_response" "get_by_id_integration_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  resource_id = aws_api_gateway_resource.get_by_id_function.id
+  http_method = aws_api_gateway_method.get_by_id_method.http_method
   status_code = "200"
 
   depends_on = [
-    aws_api_gateway_integration.put_function
+    aws_api_gateway_integration.get_by_id_integration
+  ]
+}
+
+
+resource "aws_api_gateway_integration_response" "put_integration_response_200" {
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
+  resource_id = aws_api_gateway_resource.put_function.id
+  http_method = aws_api_gateway_method.put_function_method.http_method
+  status_code = "200"
+
+  depends_on = [
+    aws_api_gateway_integration.put_function_integration
   ]
 }
 
 # New integration response for DELETE request
 resource "aws_api_gateway_integration_response" "delete_integration_response_200" {
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   resource_id = aws_api_gateway_resource.delete_function.id
-  http_method = aws_api_gateway_method.delete_function.http_method
+  http_method = aws_api_gateway_method.delete_function_method.http_method
   status_code = "200"
 
   depends_on = [
-    aws_api_gateway_integration.delete_function
+    aws_api_gateway_integration.delete_function_integration
   ]
 }
 
-resource "aws_api_gateway_deployment" "post_function" {
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////DEPLOYMENT///////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+
+resource "aws_api_gateway_deployment" "api_deployment" {
   depends_on = [
-    aws_api_gateway_integration.post_function,
+    aws_api_gateway_integration.post_function_integration,
     aws_api_gateway_method_response.respone_200,
     aws_api_gateway_integration_response.integration_response_200,
-    aws_api_gateway_integration.get_function,
+    aws_api_gateway_integration.get_function_integration,
     aws_api_gateway_method_response.get_response_200,
     aws_api_gateway_integration_response.get_integration_response_200,
-    aws_api_gateway_integration.put_function,
+    aws_api_gateway_integration.put_function_integration,
     aws_api_gateway_method_response.put_response_200,
     aws_api_gateway_integration_response.put_integration_response_200,
-    aws_api_gateway_integration.delete_function,
+    aws_api_gateway_integration.delete_function_integration,
     aws_api_gateway_method_response.delete_response_200,
-    aws_api_gateway_integration_response.delete_integration_response_200
+    aws_api_gateway_integration_response.delete_integration_response_200,
+    aws_api_gateway_integration.get_by_id_integration,
+    aws_api_gateway_method_response.get_by_id_response_200,
+    aws_api_gateway_integration_response.get_by_id_integration_response_200
   ]
 
-  rest_api_id = aws_api_gateway_rest_api.post_function.id
+  rest_api_id = aws_api_gateway_rest_api.lambda_api.id
   stage_name  = "v1"
 }
 

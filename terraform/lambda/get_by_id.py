@@ -21,7 +21,7 @@ def lambda_handler(event, context):
                     "headers": {
                         "Content-Type": "application/json"
                     },
-                    "body": json.dumps(item)
+                    "body": item
                 }
             else:
                 return {
@@ -40,7 +40,7 @@ def lambda_handler(event, context):
                 "headers": {
                     "Content-Type": "application/json"
                 },
-                "body": json.dumps(items)
+                "body": items
             }
 
     except Exception as e:
