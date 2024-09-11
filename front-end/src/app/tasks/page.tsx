@@ -4,7 +4,7 @@ import Navbar from "../../../components/Navbar";
 import Link from "next/link";
 
 const Page = () => {
-  const url = "https://7iizyw9838.execute-api.eu-central-1.amazonaws.com/v1"
+  const url = "https://f69d9qo89i.execute-api.eu-central-1.amazonaws.com/v1"
   const [data, setData] = useState<
     { id: string; name: string; description: string; value: string }[]
   >([]);
@@ -16,7 +16,7 @@ const Page = () => {
 
   useEffect(() => {
     fetch(
-      `${url}/get`,
+      `${url}/get_function`,
     )
       .then((response) => response.json())
       .then((json) => {
