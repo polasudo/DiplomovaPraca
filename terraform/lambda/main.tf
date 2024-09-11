@@ -131,11 +131,18 @@ resource "aws_lambda_function" "delete_function" {
   }
 }
 
-# HTTP API Gateway v2 Setup
-
+# HTTP API Gateway v2 Setup with CORS
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "HTTP API for Lambda"
   protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins = ["*"]   # Allows all origins
+    allow_methods = ["*"]   # Allows all methods
+    allow_headers = ["*"]   # Allows all headers
+    expose_headers = ["*"]  # Allows all headers to be exposed
+    max_age        = 3600   # Sets the max age for preflight requests
+  }
 }
 
 # Lambda Integration for HTTP API v2
