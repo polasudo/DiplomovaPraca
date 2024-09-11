@@ -5,7 +5,7 @@ import Navbar from "../../../../components/Navbar";
 
 const Page = () => {
   const url = "https://2wjgvjivrf.execute-api.eu-central-1.amazonaws.com/v1"
-  const router = useRouter();
+  const router = useRouter(); // NOT WORKING
   const { id } = router.query; // Extract task ID from the URL
   const [task, setTask] = useState({ name: "", description: "", value: "" });
   const [isLoading, setIsLoading] = useState(true);
@@ -17,7 +17,6 @@ const Page = () => {
       fetch(
         `${url}/${id}`,
         {
-          method: "POST",
           headers: {
             "Content-Type": "application/json",
           },

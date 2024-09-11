@@ -13,3 +13,4 @@ terraform/lambda/terraform.tfstate.backup
 terraform/lambda/terraform.tfstate
 terraform/lambda/terraform.tfstate
 terraform/lambda/terraform.tfstate.backup
+/terraform/lambda/.terraform

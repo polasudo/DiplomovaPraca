@@ -4,7 +4,7 @@ import Navbar from "../../../components/Navbar";
 import Link from "next/link";
 
 const Page = () => {
-  const url = "https://2wjgvjivrf.execute-api.eu-central-1.amazonaws.com/v1"
+  const url = "https://7iizyw9838.execute-api.eu-central-1.amazonaws.com/v1"
   const [data, setData] = useState<
     { id: string; name: string; description: string; value: string }[]
   >([]);
@@ -16,11 +16,11 @@ const Page = () => {
 
   useEffect(() => {
     fetch(
-      `${url}/get_function`,
+      `${url}/get`,
     )
       .then((response) => response.json())
       .then((json) => {
-        const transformedData = JSON.parse(json.body);
+        const transformedData = json;
         setData(transformedData); // Update the state with the fetched data
       })
       .catch((error) => console.error("Error fetching data:", error));
@@ -42,9 +42,9 @@ const Page = () => {
 
     try {
       const response = await fetch(
-        `${url}/put_function`,
+        `${url}/post_function`,
         {
-          method: "PUT",
+          method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
