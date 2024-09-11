@@ -4,7 +4,7 @@ import Navbar from "../../../components/Navbar";
 import Link from "next/link";
 
 const Page = () => {
-  const url = process.env.AWS_URL
+  const url = "https://2wjgvjivrf.execute-api.eu-central-1.amazonaws.com/v1"
   const [data, setData] = useState<
     { id: string; name: string; description: string; value: string }[]
   >([]);
@@ -16,7 +16,7 @@ const Page = () => {
 
   useEffect(() => {
     fetch(
-      `${url}/get_example_lambda_try_part`
+      `${url}/get_function`,
     )
       .then((response) => response.json())
       .then((json) => {
@@ -42,9 +42,9 @@ const Page = () => {
 
     try {
       const response = await fetch(
-        `${url}/example_lambda_try_part`,
+        `${url}/put_function`,
         {
-          method: "POST",
+          method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
