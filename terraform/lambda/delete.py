@@ -1,5 +1,4 @@
 import json
-import os
 import boto3
 
 # Fetch the table name from the environment variable
@@ -16,6 +15,9 @@ def lambda_handler(event, context):
             return {
                 "statusCode": 400,
                 "headers": {
+                    "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
                     "Content-Type": "application/json"
                 },
                 "body": json.dumps({"error": "id is required to delete an item"})
@@ -30,6 +32,9 @@ def lambda_handler(event, context):
             return {
                 "statusCode": 200,
                 "headers": {
+                    "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
                     "Content-Type": "application/json"
                 },
                 "body": json.dumps({
@@ -50,7 +55,10 @@ def lambda_handler(event, context):
         return {
             "statusCode": 500,
             "headers": {
-                "Content-Type": "application/json"
-            },
+                    "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Content-Type": "application/json"
+                },
             "body": json.dumps({"error": str(e)})
         }

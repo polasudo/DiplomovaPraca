@@ -62,7 +62,6 @@ resource "aws_lambda_function" "post_function" {
   environment {
     variables = {
       DYNAMODB_TABLE_NAME = "example-table"
-      post_function_ENV_VARIABLE = "dev"
     }
   }
 }
@@ -133,55 +132,55 @@ resource "aws_lambda_function" "delete_function" {
 
 # HTTP API Gateway v2 Setup with CORS
 resource "aws_apigatewayv2_api" "http_api" {
-  name          = "HTTP API for Lambda"
+  name          = "API"
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_origins = ["*"]   # Allows all origins
-    allow_methods = ["*"]   # Allows all methods
-    allow_headers = ["*"]   # Allows all headers
-    expose_headers = ["*"]  # Allows all headers to be exposed
-    max_age        = 3600   # Sets the max age for preflight requests
+    allow_origins = ["*"]
+    allow_methods = ["*"]
+    allow_headers = ["*"]
+    expose_headers = ["*"]
+    max_age        = 3600
   }
 }
 
-# Lambda Integration for HTTP API v2
+# Lambda Integration for HTTP API v2 (always use POST for AWS_PROXY)
 resource "aws_apigatewayv2_integration" "post_function_integration" {
   api_id             = aws_apigatewayv2_api.http_api.id
   integration_type   = "AWS_PROXY"
   integration_uri    = aws_lambda_function.post_function.invoke_arn
-  integration_method = "POST"
+  integration_method = "POST"  # AWS_PROXY requires POST method
 }
 
 resource "aws_apigatewayv2_integration" "get_function_integration" {
   api_id             = aws_apigatewayv2_api.http_api.id
   integration_type   = "AWS_PROXY"
   integration_uri    = aws_lambda_function.get_function.invoke_arn
-  integration_method = "POST"
+  integration_method = "POST"  # AWS_PROXY requires POST method
 }
 
 resource "aws_apigatewayv2_integration" "get_by_id_function_integration" {
   api_id             = aws_apigatewayv2_api.http_api.id
   integration_type   = "AWS_PROXY"
   integration_uri    = aws_lambda_function.get_by_id_function.invoke_arn
-  integration_method = "POST"
+  integration_method = "POST"  # AWS_PROXY requires POST method
 }
 
 resource "aws_apigatewayv2_integration" "put_function_integration" {
   api_id             = aws_apigatewayv2_api.http_api.id
   integration_type   = "AWS_PROXY"
   integration_uri    = aws_lambda_function.put_function.invoke_arn
-  integration_method = "POST"
+  integration_method = "POST"  # AWS_PROXY requires POST method
 }
 
 resource "aws_apigatewayv2_integration" "delete_function_integration" {
   api_id             = aws_apigatewayv2_api.http_api.id
   integration_type   = "AWS_PROXY"
   integration_uri    = aws_lambda_function.delete_function.invoke_arn
-  integration_method = "POST"
+  integration_method = "POST"  # AWS_PROXY requires POST method
 }
 
-# Routes for each function
+# Routes for each function (map correct HTTP method in routes)
 resource "aws_apigatewayv2_route" "post_function_route" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /post_function"
@@ -258,6 +257,24 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.http_api.id
   name        = "v1"
   auto_deploy = true
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gateway_logs.arn
+    format = jsonencode({
+      requestId        = "$context.requestId"
+      requestTime      = "$context.requestTime"
+      httpMethod       = "$context.httpMethod"
+      resourcePath     = "$context.resourcePath"
+      status           = "$context.status"
+      responseLength   = "$context.responseLength"
+    })
+  }
+}
+
+# CloudWatch Log Group for API Gateway Logs
+resource "aws_cloudwatch_log_group" "api_gateway_logs" {
+  name = "/aws/apigateway/${aws_apigatewayv2_api.http_api.name}"
+  retention_in_days = 7
 }
 
 # DynamoDB Table

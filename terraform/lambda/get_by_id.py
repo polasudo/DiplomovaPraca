@@ -19,14 +19,20 @@ def lambda_handler(event, context):
                 return {
                     "statusCode": 200,
                     "headers": {
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
                         "Content-Type": "application/json"
                     },
-                    "body": item
+                    "body": json.dumps(items)
                 }
             else:
                 return {
                     "statusCode": 404,
                     "headers": {
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
                         "Content-Type": "application/json"
                     },
                     "body": json.dumps({"message": "Item not found"})
@@ -38,16 +44,22 @@ def lambda_handler(event, context):
             return {
                 "statusCode": 200,
                 "headers": {
-                    "Content-Type": "application/json"
-                },
-                "body": items
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Content-Type": "application/json"
+                    },
+                "body": json.dumps(items)
             }
 
     except Exception as e:
         return {
             "statusCode": 500,
             "headers": {
-                "Content-Type": "application/json"
-            },
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Content-Type": "application/json"
+                    },
             "body": json.dumps({"error": str(e)})
         }

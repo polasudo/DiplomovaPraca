@@ -15,9 +15,25 @@ def lambda_handler(event, context):
             return {
                 "statusCode": 400,
                 "headers": {
-                    "Content-Type": "application/json"
-                },
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Content-Type": "application/json"
+                    },
                 "body": json.dumps({"error": "id is required to update an item"})
+            }
+        
+        # Check if there is at least one field to update
+        if not any(field in body for field in ['name', 'description', 'value']):
+            return {
+                "statusCode": 400,
+                "headers": {
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Content-Type": "application/json"
+                    },
+                "body": json.dumps({"error": "No fields to update"})
             }
         
         # Update item attributes
@@ -55,8 +71,11 @@ def lambda_handler(event, context):
         return {
             "statusCode": 200,
             "headers": {
-                "Content-Type": "application/json"
-            },
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Content-Type": "application/json"
+                    },
             "body": json.dumps({
                 "message": "Item updated successfully",
                 "updatedAttributes": response.get('Attributes')
@@ -67,7 +86,10 @@ def lambda_handler(event, context):
         return {
             "statusCode": 500,
             "headers": {
-                "Content-Type": "application/json"
-            },
+                        "Access-Control-Allow-Origin": "*",  # Allow all origins (adjust as needed)
+                        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type",
+                        "Content-Type": "application/json"
+                    },
             "body": json.dumps({"error": str(e)})
         }
