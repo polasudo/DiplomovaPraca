@@ -4,7 +4,7 @@ import Navbar from "../../../components/Navbar";
 import Link from "next/link";
 
 const Page = () => {
-  const url = "https://2odiv1ixc0.execute-api.eu-central-1.amazonaws.com/v1";
+  const url = "https://ye03yy1hg3.execute-api.eu-central-1.amazonaws.com/v1";
   const [data, setData] = useState<
     { id: string; name: string; description: string; value: string }[]
   >([]);
@@ -14,21 +14,23 @@ const Page = () => {
     value: "",
   });
 
+  // Fetch tasks on component mount
   useEffect(() => {
     fetch(`${url}/get_function`)
       .then((response) => response.json())
       .then((json) => {
-        const transformedData = json.body; // Access the body array
-        setData(transformedData); // Update the state with the fetched data
+        setData(json); // Update the state with the fetched data
       })
       .catch((error) => console.error("Error fetching data:", error));
   }, []);
 
+  // Handle form input changes
   const handleChange = (e: any) => {
     const { name, value } = e.target;
     setNewTask({ ...newTask, [name]: value });
   };
 
+  // Handle adding a new task
   const handleSubmit = async (e: any) => {
     e.preventDefault();
 
@@ -62,12 +64,37 @@ const Page = () => {
     }
   };
 
+  // Handle deleting a task
+  const handleDelete = async (id: string) => {
+    try {
+      const response = await fetch(`${url}/delete_function`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id }), // Send the task ID for deletion
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete the task");
+      }
+
+      const result = await response.json();
+      console.log("Task deleted successfully:", result);
+
+      // Update the local state to remove the deleted task
+      setData(data.filter((task) => task.id !== id));
+    } catch (error) {
+      console.error("Error deleting task:", error);
+    }
+  };
+
   return (
     <>
       <Navbar />
       <div className="min-h-screen bg-gradient-to-r from-blue-50 to-indigo-100 py-10">
         <div className="container mx-auto px-4">
-          <h1 className="text-4xl font-extrabold text-center text-indigo-800 mb-12">
+          <h1 className="text-4xl font-extrabold text-center text-indigo-800 mb-12 mt-10">
             Task Manager
           </h1>
 
@@ -133,7 +160,10 @@ const Page = () => {
                   <span className="font-semibold">Value:</span> {item.value}
                 </p>
                 <div className="flex space-x-4">
-                  <button className="mt-4 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-500 transition-colors duration-300">
+                  <button
+                    onClick={() => handleDelete(item.id)}
+                    className="mt-4 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-500 transition-colors duration-300"
+                  >
                     Delete
                   </button>
                   <Link href={`/tasks/${item.id}`}>

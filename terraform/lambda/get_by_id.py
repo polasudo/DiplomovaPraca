@@ -24,7 +24,7 @@ def lambda_handler(event, context):
                         "Access-Control-Allow-Headers": "Content-Type",
                         "Content-Type": "application/json"
                     },
-                    "body": json.dumps(items)
+                    "body": json.dumps(item)
                 }
             else:
                 return {

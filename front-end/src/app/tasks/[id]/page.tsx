@@ -4,8 +4,9 @@ import { useParams } from "next/navigation"; // useParams for dynamic routing
 import Navbar from "../../../../components/Navbar";
 
 const Page = () => {
-  const url = "https://2odiv1ixc0.execute-api.eu-central-1.amazonaws.com/v1";
+  const url = "https://ye03yy1hg3.execute-api.eu-central-1.amazonaws.com/v1";
   const { id } = useParams(); // Get the 'id' from the URL
+  const [prevTask, setPrevTask] = useState({ name: "", description: "", value: "" });
   const [task, setTask] = useState({ name: "", description: "", value: "" });
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -13,7 +14,7 @@ const Page = () => {
   // Fetch task details using GET request on page load
   useEffect(() => {
     if (id) {
-      fetch(`${url}/get_task/${id}`, {
+      fetch(`${url}/get_by_id/${id}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -22,6 +23,7 @@ const Page = () => {
         .then((response) => response.json())
         .then((json) => {
           if (json) {
+            setPrevTask(json); // Set previous task data to state
             setTask(json); // Set task data to state
           } else {
             console.error("Task not found");
@@ -55,7 +57,7 @@ const Page = () => {
         value: task.value,
       };
 
-      const response = await fetch(`${url}/update_task`, {
+      const response = await fetch(`${url}/put_function`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -86,7 +88,7 @@ const Page = () => {
       <Navbar />
       <div className="min-h-screen bg-gradient-to-r from-blue-50 to-indigo-100 py-10">
         <div className="container mx-auto px-4">
-          <h1 className="text-4xl font-extrabold text-center text-indigo-800 mb-12">
+          <h1 className="text-4xl font-extrabold text-center text-indigo-800 mb-12 mt-10">
             Task Detail
           </h1>
           <div className="flex justify-center">
@@ -94,7 +96,8 @@ const Page = () => {
               <h2 className="text-2xl font-bold text-gray-800 mb-6">Edit Task</h2>
               <form onSubmit={handleUpdate} className="space-y-4">
                 <div>
-                  <label className="block text-gray-700 font-medium">Name</label>
+                  <label className="block text-gray-700 font-bold">Name</label>
+                  <h1 className="text-black block">Previous name: {prevTask.name}</h1>
                   <input
                     type="text"
                     name="name"
@@ -105,7 +108,8 @@ const Page = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-gray-700 font-medium">Description</label>
+                  <label className="block text-gray-700 font-bold">Description</label>
+                  <h1 className="text-black block">Previous description: {prevTask.description}</h1>
                   <textarea
                     name="description"
                     value={task.description}
@@ -116,7 +120,8 @@ const Page = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-gray-700 font-medium">Value</label>
+                  <label className="block text-gray-700 font-bold">Value</label>
+                  <h1 className="text-black block">Previous value: {prevTask.value}</h1>
                   <input
                     type="text"
                     name="value"
