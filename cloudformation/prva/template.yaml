@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  A CloudFormation template for a serverless prototype application.
+  It provisions an admin IAM role, a Lambda function (with a Function URL),
+  a PostgreSQL database instance using Amazon RDS, and an Amplify app for the front-end.
+
+Parameters:
+  DBName:
+    Description: The PostgreSQL database name.
+    Type: String
+    Default: "mydatabase"
+  DBUsername:
+    Description: The PostgreSQL database admin username.
+    Type: String
+    Default: "admin"
+  DBPassword:
+    Description: The PostgreSQL database admin password.
+    Type: String
+    NoEcho: true
+    Default: "ChangeMe123!"
+  DBInstanceClass:
+    Description: RDS instance type.
+    Type: String
+    Default: db.t3.micro
+  VpcSubnets:
+    Description: Comma-separated list of VPC subnet IDs for the RDS instance.
+    Type: List<AWS::EC2::Subnet::Id>
+
+Resources:
+  AdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AdminRoleForPrototype
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  MyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PrototypeLambdaFunction
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt AdminRole.Arn
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': 'Hello from Lambda!'
+              }
+
+  MyLambdaFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref MyLambdaFunction
+      AuthType: NONE
+
+  MyDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnet group for the PostgreSQL instance"
+      SubnetIds: !Ref VpcSubnets
+
+  PostgresDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: PrototypePostgresDB
+      Engine: postgres
+      EngineVersion: "13.3"
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: !Ref DBName
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 20
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      # Optionally, add VPCSecurityGroups if needed:
+      # VPCSecurityGroups:
+      #   - sg-xxxxxxxx
+
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: PrototypeAmplifyApp
+      Repository: "https://github.com/example/prototype-frontend"  # Replace with your repository URL
+      # If your repository is private, include an OAuth token (refer to AWS Amplify docs for details)
+      OauthToken: ""
+
+Outputs:
+  LambdaFunctionUrl:
+    Description: "The URL for the Lambda function"
+    Value: !GetAtt MyLambdaFunctionUrl.FunctionUrl
+
+  AmplifyAppId:
+    Description: "The Amplify App ID"
+    Value: !Ref AmplifyApp

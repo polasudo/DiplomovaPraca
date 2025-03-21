@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation template demonstrating our standardized infrastructure code and CI/CD automation.
+  This template creates:
+    - A parameterized environment (Dev, Staging, or Prod).
+    - A CodeCommit repository to store our infrastructure-as-code.
+    - An S3 bucket for CodePipeline artifacts.
+    - A CodeBuild project to build and validate our code.
+    - A CodePipeline pipeline that integrates CodeCommit and CodeBuild.
+  This setup supports our multi-environment, multi-account strategy to ensure consistent and automated deployments.
+
+Parameters:
+  Environment:
+    Description: "Deployment environment (Dev, Staging, or Prod)"
+    Type: String
+    AllowedValues: [Dev, Staging, Prod]
+    Default: Dev
+
+Resources:
+  # S3 bucket for storing CodePipeline artifacts
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "infra-artifacts-${AWS::AccountId}-${Environment}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CodeCommit repository for infrastructure code
+  InfrastructureRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Sub "InfrastructureRepo-${Environment}"
+      RepositoryDescription: "Repository for CloudFormation templates and infrastructure code for the ${Environment} environment."
+    Metadata:
+      Comment: "This repository holds the CloudFormation templates that define our infrastructure."
+
+  # IAM Role for CodeBuild
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "CodeBuildRole-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - codecommit:GitPull
+                Resource: "*"
+
+  # CodeBuild project that uses the CodeCommit repository
+  InfraBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "InfraBuildProject-${Environment}"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:5.0
+        Type: LINUX_CONTAINER
+      Source:
+        Type: CODECOMMIT
+        Location: !GetAtt InfrastructureRepo.CloneUrlHttp
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # IAM Role for CodePipeline
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "CodePipelineRole-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodePipelinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codecommit:*
+                  - codebuild:*
+                  - s3:*
+                  - iam:PassRole
+                Resource: "*"
+
+  # CodePipeline pipeline that integrates CodeCommit and CodeBuild
+  InfraCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "InfraPipeline-${Environment}"
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                RepositoryName: !Ref InfrastructureRepo
+                BranchName: master
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              Configuration:
+                ProjectName: !Ref InfraBuildProject
+              RunOrder: 1
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  RepositoryCloneUrl:
+    Description: "Clone URL (HTTP) for the CodeCommit repository"
+    Value: !GetAtt InfrastructureRepo.CloneUrlHttp
+
+  CodeBuildProjectName:
+    Description: "Name of the CodeBuild project"
+    Value: !Ref InfraBuildProject
+
+  CodePipelineName:
+    Description: "Name of the CodePipeline pipeline"
+    Value: !Ref InfraCodePipeline

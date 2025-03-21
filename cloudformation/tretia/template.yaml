@@ -1,0 +1,275 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation template for launching the paywall service for our SaaS solution.
+  This template includes:
+    - Paywall API using API Gateway integrated with Lambda.
+    - A Step Functions state machine for multi-step paywall workflows.
+    - Security enhancements using WAF and Shield.
+    - Centralized secret storage using Secrets Manager.
+    - A VPC endpoint for secure connectivity to the bank’s API.
+    - Multi-regional deployment support via a Route53 latency-based record.
+    - A Fault Injection Simulator experiment for failure testing.
+
+Parameters:
+  HostedZoneId:
+    Description: "Route53 Hosted Zone ID for your domain."
+    Type: String
+  DomainName:
+    Description: "Domain name for the Paywall API (e.g. paywall.example.com)."
+    Type: String
+  VpcId:
+    Description: "VPC ID for creating the VPC Endpoint."
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Description: "Subnet IDs for the VPC Endpoint."
+    Type: List<AWS::EC2::Subnet::Id>
+  BankApiServiceName:
+    Description: "Service name for the bank's API VPC Endpoint (e.g. com.amazonaws.vpce.bankapi)."
+    Type: String
+    Default: "com.amazonaws.vpce.bankapi"
+
+Resources:
+  ## IAM Role for Paywall Lambda Function with minimal privileges.
+  PaywallLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PaywallLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PaywallLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Allow CloudWatch logging.
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              # Allow read access to secrets and decryption.
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - kms:Decrypt
+                Resource: "*"
+
+  ## Paywall Lambda Function
+  PaywallLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PaywallLambdaFunction
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt PaywallLambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              # Custom paywall logic goes here.
+              return {
+                  "statusCode": 200,
+                  "body": "Paywall processed successfully"
+              }
+
+  ## API Gateway (HTTP API) to expose the paywall service.
+  PaywallApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: PaywallApi
+      ProtocolType: HTTP
+
+  PaywallLambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref PaywallApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PaywallLambdaFunction.Arn}/invocations
+      PayloadFormatVersion: "2.0"
+
+  PaywallApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref PaywallApi
+      RouteKey: "$default"
+      Target: !Sub integrations/${PaywallLambdaIntegration}
+
+  PaywallApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref PaywallApi
+      StageName: prod
+      AutoDeploy: true
+
+  ## AWS Shield Protection for the API Gateway.
+  ApiShieldProtection:
+    Type: AWS::Shield::Protection
+    Properties:
+      Name: PaywallApiProtection
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/apis/${PaywallApi}
+
+  ## WAF WebACL for additional protection (e.g. against SQL injection and XSS).
+  PaywallWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: PaywallWebACL
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: PaywallWebACL
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: SQLInjectionRule
+          Priority: 1
+          Statement:
+            SqliMatchStatement:
+              FieldToMatch:
+                QueryString: {}
+              TextTransformations:
+                - Priority: 0
+                  Type: NONE
+          Action:
+            Block: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: SQLInjectionRule
+            SampledRequestsEnabled: true
+        - Name: XSSRule
+          Priority: 2
+          Statement:
+            XssMatchStatement:
+              FieldToMatch:
+                Body: {}
+              TextTransformations:
+                - Priority: 0
+                  Type: NONE
+          Action:
+            Block: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: XSSRule
+            SampledRequestsEnabled: true
+
+  ## Associate the WAF WebACL with the API Gateway.
+  ApiWebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/apis/${PaywallApi}
+      WebACLArn: !GetAtt PaywallWebACL.Arn
+
+  ## IAM Role for Step Functions (to invoke Lambda).
+  PaywallStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PaywallStepFunctionsRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt PaywallLambdaFunction.Arn
+
+  ## Step Functions State Machine for managing complex paywall workflows.
+  PaywallStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: PaywallStateMachine
+      RoleArn: !GetAtt PaywallStepFunctionsRole.Arn
+      DefinitionString: |
+        {
+          "Comment": "State machine for paywall processing",
+          "StartAt": "ProcessPayment",
+          "States": {
+            "ProcessPayment": {
+              "Type": "Task",
+              "Resource": "${PaywallLambdaFunction.Arn}",
+              "Next": "SendConfirmation"
+            },
+            "SendConfirmation": {
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        }
+
+  ## Secrets Manager secret for storing payment gateway API keys.
+  PaymentGatewaySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: PaymentGatewayAPIKey
+      Description: "API key for payment gateway integration"
+      SecretString: '{"apiKey": "ReplaceWithActualKey"}'
+
+  ## VPC Endpoint for private communication with the bank’s API.
+  BankApiVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      SubnetIds: !Ref SubnetIds
+      ServiceName: !Ref BankApiServiceName
+      VpcEndpointType: Interface
+
+  ## Route53 latency-based record for multi-regional deployment.
+  PaywallApiRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      SetIdentifier: "PrimaryRegion"
+      TTL: "60"
+      Region: !Ref AWS::Region
+      AliasTarget:
+        DNSName: !GetAtt PaywallApi.ApiEndpoint
+        # HostedZoneId for API Gateway regional endpoints. Adjust if necessary.
+        HostedZoneId: "Z2FDTNDATAQYW2"
+
+  ## Fault Injection Simulator experiment for testing paywall failures.
+  PaywallFISExperiment:
+    Type: AWS::FIS::ExperimentTemplate
+    Properties:
+      Description: "Experiment to simulate failures in the paywall service"
+      Targets:
+        LambdaTarget:
+          ResourceType: aws:lambda:function
+          ResourceArns:
+            - !GetAtt PaywallLambdaFunction.Arn
+          SelectionMode: ALL
+      Actions:
+        LambdaAction:
+          ActionId: aws:lambda:stop
+          Description: "Simulate Lambda failure"
+          Parameters: {}
+          Targets:
+            LambdaTarget: LambdaTarget
+      StopConditions:
+        - Source: aws:cloudwatch:alarm
+          Value: "AnyAlarm"  # Configure an appropriate CloudWatch alarm here
+
+Outputs:
+  PaywallApiEndpoint:
+    Description: "The endpoint URL for the Paywall API"
+    Value: !GetAtt PaywallApi.ApiEndpoint
+  PaywallStateMachineArn:
+    Description: "ARN of the Step Functions state machine for the paywall workflow"
+    Value: !Ref PaywallStateMachine
+  PaymentGatewaySecretARN:
+    Description: "ARN of the Secrets Manager secret for payment gateway API keys"
+    Value: !Ref PaymentGatewaySecret

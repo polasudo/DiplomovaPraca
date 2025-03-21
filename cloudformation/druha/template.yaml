@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CFN Template for an enhanced, secure, and compliant serverless application.
+  This template provisions:
+    - A Lambda function with a dedicated, minimal IAM role.
+    - An API Gateway (HTTP API) for routing requests.
+    - AWS Cognito (User Pool, Client, and Identity Pool) for authentication.
+    - A KMS key (with alias) for managing secrets.
+    - AWS Config (Configuration Recorder, Delivery Channel, and encrypted S3 bucket) for compliance.
+    - An IAM Access Analyzer for auditing IAM policies.
+
+Parameters:
+  S3BucketName:
+    Description: "Name of the S3 bucket used by Lambda (if needed)."
+    Type: String
+    Default: "your-secure-bucket"  # Replace with your bucket name
+  LambdaS3BucketPrefix:
+    Description: "S3 prefix for accessing bucket objects."
+    Type: String
+    Default: "/*"  # Adjust if necessary
+
+Resources:
+  # 1. IAM Role for Lambda with minimal permissions.
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MinimalLambdaRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MinimalLambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Allow logging
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              # Minimal permissions for RDS (if needed)
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                Resource: "*"
+              # Minimal access to a specified S3 bucket
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub arn:aws:s3:::${S3BucketName}${LambdaS3BucketPrefix}
+
+  # 2. Lambda Function using the dedicated role.
+  MySecureLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: SecureLambdaFunction
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {
+                  "statusCode": 200,
+                  "body": "Secure Lambda response"
+              }
+
+  # 3. API Gateway (HTTP API) to serve as a centralized entry point.
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: SecureApiGateway
+      ProtocolType: HTTP
+
+  LambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MySecureLambdaFunction.Arn}/invocations
+      PayloadFormatVersion: "2.0"
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "$default"
+      Target: !Sub integrations/${LambdaIntegration}
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: prod
+      AutoDeploy: true
+
+  # 4. Cognito User Pool for authentication.
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: SecureUserPool
+      AutoVerifiedAttributes:
+        - email
+      AliasAttributes:
+        - email
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: SecureUserPoolClient
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+
+  CognitoIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: SecureIdentityPool
+      AllowUnauthenticatedIdentities: false
+      CognitoIdentityProviders:
+        - ClientId: !Ref CognitoUserPoolClient
+          ProviderName: !Sub cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}
+
+  # 5. KMS Key for storing sensitive secret keys.
+  MyKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "KMS Key for storing sensitive secret keys"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "EnableRootPermissions"
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: "kms:*"
+            Resource: "*"
+
+  MyKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/mySecureKey
+      TargetKeyId: !Ref MyKMSKey
+
+  # 6. AWS Config: S3 Bucket (with encryption), Configuration Recorder, and Delivery Channel.
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-config-bucket-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ConfigRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSConfigRoleForCompliance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AWSConfigPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetBucketAcl
+                Resource: "*"
+              - Effect: Allow
+                Action: config:*
+                Resource: "*"
+
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Properties:
+      Name: "default"
+      RoleARN: !GetAtt ConfigRole.Arn
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Properties:
+      Name: "default"
+      S3BucketName: !Ref ConfigBucket
+
+  # 7. IAM Access Analyzer for auditing IAM policies.
+  IAMAccessAnalyzer:
+    Type: AWS::AccessAnalyzer::Analyzer
+    Properties:
+      AnalyzerName: "MyAccessAnalyzer"
+      Type: ACCOUNT
+
+Outputs:
+  ApiEndpoint:
+    Description: "HTTP API Gateway endpoint URL"
+    Value: !GetAtt HttpApi.ApiEndpoint
+
+  LambdaFunctionArn:
+    Description: "ARN of the secure Lambda function"
+    Value: !GetAtt MySecureLambdaFunction.Arn
+
+  CognitoUserPoolId:
+    Description: "ID of the Cognito User Pool"
+    Value: !Ref CognitoUserPool
+
+  KmsKeyAlias:
+    Description: "Alias of the KMS key for secrets"
+    Value: !Ref MyKMSKeyAlias
