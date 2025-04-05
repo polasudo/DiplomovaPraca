@@ -1,223 +1,1020 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >
-  CFN Template for an enhanced, secure, and compliant serverless application.
-  This template provisions:
-    - A Lambda function with a dedicated, minimal IAM role.
-    - An API Gateway (HTTP API) for routing requests.
-    - AWS Cognito (User Pool, Client, and Identity Pool) for authentication.
-    - A KMS key (with alias) for managing secrets.
-    - AWS Config (Configuration Recorder, Delivery Channel, and encrypted S3 bucket) for compliance.
-    - An IAM Access Analyzer for auditing IAM policies.
+Description: >-
+  (SHOWCASE ONLY - NO FUNCTIONAL LOGIC) CloudFormation template for a serverless
+  Customer/Order Management Web App Backend structure using API Gateway, Lambda (inline placeholders),
+  DynamoDB, and Cognito. Deployable but Lambdas are non-functional placeholders.
 
 Parameters:
-  S3BucketName:
-    Description: "Name of the S3 bucket used by Lambda (if needed)."
+  ProjectName:
     Type: String
-    Default: "your-secure-bucket"  # Replace with your bucket name
-  LambdaS3BucketPrefix:
-    Description: "S3 prefix for accessing bucket objects."
-    Type: String
-    Default: "/*"  # Adjust if necessary
+    Default: ServerlessShowcaseApp
+    Description: A prefix for resource names to ensure uniqueness and grouping.
 
 Resources:
-  # 1. IAM Role for Lambda with minimal permissions.
+  # --- DynamoDB Tables ---
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-Customers'
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-Orders'
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserOrdersIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  FeedbackTable: # Added for feedback feature showcase
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-Feedback'
+      AttributeDefinitions:
+        - AttributeName: feedbackId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: feedbackId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # --- Cognito User Pool for Authentication ---
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${ProjectName}-UserPool'
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub '${ProjectName}-WebAppClient'
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+  # --- IAM Role for Lambda Functions ---
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: MinimalLambdaRole
+      RoleName: !Sub '${ProjectName}-LambdaExecutionRole'
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: MinimalLambdaPolicy
+        - PolicyName: !Sub '${ProjectName}-LambdaDynamoDBPolicy'
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
-              # Allow logging
+              - Effect: Allow # Intended permissions (code is placeholder)
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt CustomersTable.Arn
+                  - !GetAtt OrdersTable.Arn
+                  - !Sub '${OrdersTable.Arn}/index/UserOrdersIndex'
+                  - !GetAtt FeedbackTable.Arn
+              - Effect: Allow # Intended Cognito permissions
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminInitiateAuth
+                  - cognito-idp:AdminRespondToAuthChallenge
+                  - cognito-idp:SignUp
+                  - cognito-idp:ConfirmSignUp
+                Resource: !GetAtt UserPool.Arn
+        - PolicyName: !Sub '${ProjectName}-LambdaCloudWatchPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: arn:aws:logs:*:*:*
-              # Minimal permissions for RDS (if needed)
-              - Effect: Allow
-                Action:
-                  - rds:DescribeDBInstances
-                Resource: "*"
-              # Minimal access to a specified S3 bucket
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                Resource: !Sub arn:aws:s3:::${S3BucketName}${LambdaS3BucketPrefix}
+                Resource: 'arn:aws:logs:*:*:*'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  # 2. Lambda Function using the dedicated role.
-  MySecureLambdaFunction:
+  # --- Lambda Functions (Inline Placeholders - NO REAL LOGIC) ---
+  # Shared placeholder code for all functions below.
+  SharedPlaceholderFunctionCode: &SharedPlaceholderFunctionCode |-
+    import json
+    import os
+    def lambda_handler(event, context):
+        print(f"Placeholder function '{context.function_name}' invoked.")
+        print("Received event: " + json.dumps(event, indent=2))
+        return {
+            'statusCode': 200,
+            'headers': { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            'body': json.dumps({
+                'message': f'Placeholder success from {context.function_name} (No action taken)',
+                'received_event': event
+            })
+        }
+
+  RegisterUserFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: SecureLambdaFunction
+      FunctionName: !Sub '${ProjectName}-RegisterUser'
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: |
-          def lambda_handler(event, context):
-              return {
-                  "statusCode": 200,
-                  "body": "Secure Lambda response"
-              }
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+          CUSTOMERS_TABLE_NAME: !Ref CustomersTable
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  # 3. API Gateway (HTTP API) to serve as a centralized entry point.
-  HttpApi:
-    Type: AWS::ApiGatewayV2::Api
+  LoginUserFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      Name: SecureApiGateway
-      ProtocolType: HTTP
+      FunctionName: !Sub '${ProjectName}-LoginUser'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  LambdaIntegration:
-    Type: AWS::ApiGatewayV2::Integration
+  CreateOrderFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      ApiId: !Ref HttpApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MySecureLambdaFunction.Arn}/invocations
-      PayloadFormatVersion: "2.0"
+      FunctionName: !Sub '${ProjectName}-CreateOrder'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref OrdersTable
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  DefaultRoute:
-    Type: AWS::ApiGatewayV2::Route
+  GetOrdersFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      ApiId: !Ref HttpApi
-      RouteKey: "$default"
-      Target: !Sub integrations/${LambdaIntegration}
+      FunctionName: !Sub '${ProjectName}-GetOrders'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref OrdersTable
+          INDEX_NAME: UserOrdersIndex
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  ApiStage:
-    Type: AWS::ApiGatewayV2::Stage
+  GetOrderDetailsFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      ApiId: !Ref HttpApi
-      StageName: prod
-      AutoDeploy: true
+      FunctionName: !Sub '${ProjectName}-GetOrderDetails'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref OrdersTable
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  # 4. Cognito User Pool for authentication.
-  CognitoUserPool:
-    Type: AWS::Cognito::UserPool
+  SubmitFeedbackFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      UserPoolName: SecureUserPool
-      AutoVerifiedAttributes:
-        - email
-      AliasAttributes:
-        - email
+      FunctionName: !Sub '${ProjectName}-SubmitFeedback'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FeedbackTable
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  CognitoUserPoolClient:
-    Type: AWS::Cognito::UserPoolClient
+  GetAnalyticsFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      ClientName: SecureUserPoolClient
-      UserPoolId: !Ref CognitoUserPool
-      GenerateSecret: false
+      FunctionName: !Sub '${ProjectName}-GetAnalytics'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTable
+          CUSTOMERS_TABLE: !Ref CustomersTable
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  CognitoIdentityPool:
-    Type: AWS::Cognito::IdentityPool
+  # --- New Lambda Functions Derived from the Text ---
+  EnhanceSecurityFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      IdentityPoolName: SecureIdentityPool
-      AllowUnauthenticatedIdentities: false
-      CognitoIdentityProviders:
-        - ClientId: !Ref CognitoUserPoolClient
-          ProviderName: !Sub cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}
+      FunctionName: !Sub '${ProjectName}-EnhanceSecurity'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          SECURITY_POLICY: "Enhanced"
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  # 5. KMS Key for storing sensitive secret keys.
-  MyKMSKey:
-    Type: AWS::KMS::Key
+  ProcessPaymentWorkflowFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      Description: "KMS Key for storing sensitive secret keys"
-      KeyPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: "EnableRootPermissions"
-            Effect: Allow
-            Principal:
-              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
-            Action: "kms:*"
-            Resource: "*"
+      FunctionName: !Sub '${ProjectName}-ProcessPaymentWorkflow'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          PAYMENT_CONFIG: "Placeholder"
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  MyKMSKeyAlias:
-    Type: AWS::KMS::Alias
+  ETLDataPreparationFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      AliasName: alias/mySecureKey
-      TargetKeyId: !Ref MyKMSKey
+      FunctionName: !Sub '${ProjectName}-ETLDataPreparation'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          ETL_JOB: "Placeholder"
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  # 6. AWS Config: S3 Bucket (with encryption), Configuration Recorder, and Delivery Channel.
-  ConfigBucket:
-    Type: AWS::S3::Bucket
+  GenerateMonthlyReportFunction:
+    Type: AWS::Lambda::Function
     Properties:
-      BucketName: !Sub "${AWS::StackName}-config-bucket-${AWS::AccountId}"
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+      FunctionName: !Sub '${ProjectName}-GenerateMonthlyReport'
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: *SharedPlaceholderFunctionCode
+      Environment:
+        Variables:
+          REPORTING_SCHEDULE: "Monthly"
+      Timeout: 10
+      MemorySize: 128
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  ConfigRole:
-    Type: AWS::IAM::Role
+  # --- API Gateway ---
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
     Properties:
-      RoleName: AWSConfigRoleForCompliance
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: config.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: AWSConfigPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetBucketAcl
-                Resource: "*"
-              - Effect: Allow
-                Action: config:*
-                Resource: "*"
+      Name: !Sub '${ProjectName}-Api'
+      Description: (SHOWCASE ONLY) API for the Serverless Customer/Order Management App Structure
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      CorsConfiguration:
+        AllowOrigins:
+          - "'*'"
+        AllowMethods:
+          - "'GET'"
+          - "'POST'"
+          - "'OPTIONS'"
+        AllowHeaders:
+          - "'Content-Type'"
+          - "'X-Amz-Date'"
+          - "'Authorization'"
+          - "'X-Api-Key'"
+          - "'X-Amz-Security-Token'"
+        MaxAge: "'300'"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
 
-  ConfigRecorder:
-    Type: AWS::Config::ConfigurationRecorder
+  # --- Cognito Authorizer for Secured Endpoints ---
+  CognitoAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
     Properties:
-      Name: "default"
-      RoleARN: !GetAtt ConfigRole.Arn
-      RecordingGroup:
-        AllSupported: true
-        IncludeGlobalResourceTypes: true
+      Name: !Sub '${ProjectName}-CognitoAuthorizer'
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref RestApi
+      ProviderARNs:
+        - !GetAtt UserPool.Arn
 
-  ConfigDeliveryChannel:
-    Type: AWS::Config::DeliveryChannel
+  # --- API Gateway Resources & Methods ---
+  # Root OPTIONS method for CORS preflight
+  RootOptionsMethod:
+    Type: AWS::ApiGateway::Method
     Properties:
-      Name: "default"
-      S3BucketName: !Ref ConfigBucket
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !GetAtt RestApi.RootResourceId
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
 
-  # 7. IAM Access Analyzer for auditing IAM policies.
-  IAMAccessAnalyzer:
-    Type: AWS::AccessAnalyzer::Analyzer
+  # /register (Public)
+  RegisterResource:
+    Type: AWS::ApiGateway::Resource
     Properties:
-      AnalyzerName: "MyAccessAnalyzer"
-      Type: ACCOUNT
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: register
+  RegisterPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RegisterResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RegisterUserFunction.Arn}/invocations'
+  RegisterOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref RegisterResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates: {"application/json": '{"statusCode": 200}'}
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {"application/json": ''}
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /login (Public)
+  LoginResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: login
+  LoginPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref LoginResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LoginUserFunction.Arn}/invocations'
+  LoginOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref LoginResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates: {"application/json": '{"statusCode": 200}'}
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {"application/json": ''}
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /orders (Secured)
+  OrdersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: orders
+  OrdersPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrdersResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateOrderFunction.Arn}/invocations'
+  OrdersGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrdersResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOrdersFunction.Arn}/invocations'
+  OrdersOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref OrdersResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates: {"application/json": '{"statusCode": 200}'}
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {"application/json": ''}
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /orders/{orderId} (Secured)
+  OrderByIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref OrdersResource
+      PathPart: '{orderId}'
+  OrderByIdGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrderByIdResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      RequestParameters:
+         method.request.path.orderId: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOrderDetailsFunction.Arn}/invocations'
+  OrderByIdOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref OrderByIdResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates: {"application/json": '{"statusCode": 200}'}
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {"application/json": ''}
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /feedback (Secured)
+  FeedbackResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: feedback
+  FeedbackPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref FeedbackResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SubmitFeedbackFunction.Arn}/invocations'
+  FeedbackOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref FeedbackResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates: {"application/json": '{"statusCode": 200}'}
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {"application/json": ''}
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /analytics (Secured - Internal Use)
+  AnalyticsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: analytics
+  AnalyticsGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref AnalyticsResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAnalyticsFunction.Arn}/invocations'
+  AnalyticsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref AnalyticsResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates: {"application/json": '{"statusCode": 200}'}
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates: {"application/json": ''}
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # --- New API Gateway Resources for the Additional Lambdas ---
+  # /security (Secured)
+  SecurityResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: security
+  SecurityPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref SecurityResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${EnhanceSecurityFunction.Arn}/invocations'
+  SecurityOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref SecurityResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /payment (Secured)
+  PaymentResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: payment
+  PaymentPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref PaymentResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProcessPaymentWorkflowFunction.Arn}/invocations'
+  PaymentOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref PaymentResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /etl (Secured)
+  ETLResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: etl
+  ETLPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref ETLResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ETLDataPreparationFunction.Arn}/invocations'
+  ETLOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref ETLResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # /reporting (Secured)
+  ReportingResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: reporting
+  ReportingPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref ReportingResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GenerateMonthlyReportFunction.Arn}/invocations'
+  ReportingOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      ResourceId: !Ref ReportingResource
+      RestApiId: !Ref RestApi
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # --- Lambda Permissions to Allow API Gateway Invocation ---
+  RegisterLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt RegisterUserFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${RegisterPostMethod.HttpMethod}/${RegisterResource.PathPart}'
+  LoginLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LoginUserFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${LoginPostMethod.HttpMethod}/${LoginResource.PathPart}'
+  CreateOrderLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CreateOrderFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${OrdersPostMethod.HttpMethod}/${OrdersResource.PathPart}'
+  GetOrdersLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetOrdersFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${OrdersGetMethod.HttpMethod}/${OrdersResource.PathPart}'
+  GetOrderDetailsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetOrderDetailsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${OrderByIdGetMethod.HttpMethod}/${OrdersResource.PathPart}/${OrderByIdResource.PathPart}'
+  SubmitFeedbackLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SubmitFeedbackFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${FeedbackPostMethod.HttpMethod}/${FeedbackResource.PathPart}'
+  GetAnalyticsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetAnalyticsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${AnalyticsGetMethod.HttpMethod}/${AnalyticsResource.PathPart}'
+  EnhanceSecurityLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt EnhanceSecurityFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${SecurityPostMethod.HttpMethod}/${SecurityResource.PathPart}'
+  ProcessPaymentLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ProcessPaymentWorkflowFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${PaymentPostMethod.HttpMethod}/${PaymentResource.PathPart}'
+  ETLDataPreparationLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ETLDataPreparationFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${ETLPostMethod.HttpMethod}/${ETLResource.PathPart}'
+  GenerateMonthlyReportLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GenerateMonthlyReportFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/${ReportingPostMethod.HttpMethod}/${ReportingResource.PathPart}'
 
 Outputs:
   ApiEndpoint:
-    Description: "HTTP API Gateway endpoint URL"
-    Value: !GetAtt HttpApi.ApiEndpoint
-
-  LambdaFunctionArn:
-    Description: "ARN of the secure Lambda function"
-    Value: !GetAtt MySecureLambdaFunction.Arn
-
+    Description: The invoke URL for the API Gateway stage (Showcase)
+    Value: !Sub 'https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage.StageName}'
   CognitoUserPoolId:
-    Description: "ID of the Cognito User Pool"
-    Value: !Ref CognitoUserPool
+    Description: ID of the Cognito User Pool
+    Value: !Ref UserPool
+  CognitoUserPoolClientId:
+    Description: ID of the Cognito User Pool Client
+    Value: !Ref UserPoolClient
+  CustomersTableName:
+    Description: Name of the DynamoDB table for Customers
+    Value: !Ref CustomersTable
+  OrdersTableName:
+    Description: Name of the DynamoDB table for Orders
+    Value: !Ref OrdersTable
+  FeedbackTableName:
+    Description: Name of the DynamoDB table for Feedback
+    Value: !Ref FeedbackTable
 
-  KmsKeyAlias:
-    Description: "Alias of the KMS key for secrets"
-    Value: !Ref MyKMSKeyAlias
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: showcase
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref ApiDeployment
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          MetricsEnabled: true
+          DataTraceEnabled: false
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - RegisterPostMethod
+      - LoginPostMethod
+      - OrdersPostMethod
+      - OrdersGetMethod
+      - OrderByIdGetMethod
+      - FeedbackPostMethod
+      - AnalyticsGetMethod
+      - SecurityPostMethod
+      - PaymentPostMethod
+      - ETLPostMethod
+      - ReportingPostMethod
+    Properties:
+      RestApiId: !Ref RestApi
