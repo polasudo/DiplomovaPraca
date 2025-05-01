@@ -11,18 +11,18 @@ Parameters:
     Description: A prefix for resource names to ensure uniqueness and grouping.
 
 Resources:
-  # --- DynamoDB Tables (as described in Intro) ---
+  # --- DynamoDB Tables ---
   CustomersTable:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub '${ProjectName}-Customers'
       AttributeDefinitions:
-        - AttributeName: userId # Typically Cognito Sub
+        - AttributeName: userId
           AttributeType: S
       KeySchema:
         - AttributeName: userId
           KeyType: HASH
-      BillingMode: PAY_PER_REQUEST # Cost-effective for startups
+      BillingMode: PAY_PER_REQUEST
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -32,21 +32,20 @@ Resources:
     Properties:
       TableName: !Sub '${ProjectName}-Orders'
       AttributeDefinitions:
-        - AttributeName: orderId # Unique ID for the order
+        - AttributeName: orderId
           AttributeType: S
-        - AttributeName: userId # To link order to a customer
+        - AttributeName: userId
           AttributeType: S
       KeySchema:
         - AttributeName: orderId
           KeyType: HASH
-      # Global Secondary Index to query orders by customer (userId)
       GlobalSecondaryIndexes:
         - IndexName: UserOrdersIndex
           KeySchema:
             - AttributeName: userId
               KeyType: HASH
           Projection:
-            ProjectionType: ALL # Project all attributes for simplicity
+            ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
       Tags:
         - Key: Project
@@ -57,50 +56,44 @@ Resources:
     Properties:
       TableName: !Sub '${ProjectName}-Feedback'
       AttributeDefinitions:
-        - AttributeName: feedbackId # Unique ID for the feedback
-          AttributeType: S
-        - AttributeName: userId # Optional: To link feedback to user
+        - AttributeName: feedbackId
           AttributeType: S
       KeySchema:
         - AttributeName: feedbackId
           KeyType: HASH
-      # Optional: Add GSI on userId if needed to query feedback by user
       BillingMode: PAY_PER_REQUEST
       Tags:
         - Key: Project
           Value: !Ref ProjectName
 
-  # --- Cognito User Pool for Authentication (Required for login/register) ---
+  # --- Cognito User Pool ---
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
       UserPoolName: !Sub '${ProjectName}-UserPool'
-      Schema: # Basic schema with email as username
+      Schema:
         - Name: email
           AttributeDataType: String
           Mutable: true
           Required: true
-      Policies: # Basic password policy
+      Policies:
         PasswordPolicy:
           MinimumLength: 8
-      AutoVerifiedAttributes: [email] # Users verify via email
-      UsernameAttributes: [email] # Use email to log in
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       ClientName: !Sub '${ProjectName}-WebAppClient'
       UserPoolId: !Ref UserPool
-      GenerateSecret: false # Typically false for web/mobile clients
-      ExplicitAuthFlows: # Standard flows for web apps
+      GenerateSecret: false
+      ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-      PreventUserExistenceErrors: ENABLED # Good security practice
+      PreventUserExistenceErrors: ENABLED
 
-  # --- IAM Role for Lambda Functions (Single role for initial simplicity) ---
+  # --- IAM Role for Lambda ---
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -113,7 +106,6 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        # Policy for DynamoDB Access to all project tables
         - PolicyName: !Sub '${ProjectName}-LambdaDynamoDBPolicy'
           PolicyDocument:
             Version: '2012-10-17'
@@ -126,25 +118,23 @@ Resources:
                   - dynamodb:DeleteItem
                   - dynamodb:Query
                   - dynamodb:Scan
-                Resource: # Grant access to all defined tables
+                Resource:
                   - !GetAtt CustomersTable.Arn
                   - !GetAtt OrdersTable.Arn
-                  - !Sub '${OrdersTable.Arn}/index/*' # Access GSI too
+                  - !Sub '${OrdersTable.Arn}/index/*'
                   - !GetAtt FeedbackTable.Arn
-        # Policy for Cognito User Pool actions needed by auth lambdas
         - PolicyName: !Sub '${ProjectName}-LambdaCognitoPolicy'
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action:
-                  - cognito-idp:AdminGetUser # To check user details
-                  - cognito-idp:AdminInitiateAuth # For login
-                  - cognito-idp:AdminRespondToAuthChallenge # For login flow
-                  - cognito-idp:SignUp # For registration
-                  - cognito-idp:ConfirmSignUp # For registration confirmation
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminInitiateAuth
+                  - cognito-idp:AdminRespondToAuthChallenge
+                  - cognito-idp:SignUp
+                  - cognito-idp:ConfirmSignUp
                 Resource: !GetAtt UserPool.Arn
-        # Basic policy for CloudWatch Logs
         - PolicyName: !Sub '${ProjectName}-LambdaCloudWatchPolicy'
           PolicyDocument:
             Version: '2012-10-17'
@@ -159,38 +149,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # --- Lambda Functions (Python Placeholders - NO TRIGGERS DEFINED) ---
-  SharedPlaceholderFunctionCode: &SharedPlaceholderFunctionCode |-
-    # Placeholder Python 3.11 code for Lambda functions
-    import json
-    import os
-    import logging
-
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-
-    def lambda_handler(event, context):
-        function_name = context.function_name
-        logger.info(f"Placeholder function '{function_name}' invoked.")
-        logger.info(f"Note: This function has no API Gateway or other trigger defined in CloudFormation.")
-        logger.info("Received event: " + json.dumps(event, indent=2))
-
-        # Example accessing environment variables
-        # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME', 'N/A')
-        # ... other env vars
-
-        # --- NO ACTUAL BUSINESS LOGIC ---
-
-        return {
-            'statusCode': 200,
-            # 'headers' are usually for API Gateway responses, less relevant here
-            'body': json.dumps({
-                'message': f'Placeholder success from {function_name} (No action taken)',
-                'received_event': event
-            })
-        }
-
-  # Function for User Registration
+  # --- Lambda Functions (inline code) ---
   RegisterUserFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -199,7 +158,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
@@ -211,7 +192,6 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # Function for User Login
   LoginUserFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -220,7 +200,25 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
@@ -231,7 +229,6 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # Function to Create an Order
   CreateOrderFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -240,7 +237,25 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           ORDERS_TABLE_NAME: !Ref OrdersTable
@@ -250,7 +265,6 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # Function to Get Orders (likely for the logged-in user)
   GetOrdersFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -259,7 +273,25 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           ORDERS_TABLE_NAME: !Ref OrdersTable
@@ -270,7 +302,6 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # Function to Get Specific Order Details/Status
   GetOrderDetailsFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -279,7 +310,25 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           ORDERS_TABLE_NAME: !Ref OrdersTable
@@ -289,7 +338,6 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # Function to Submit Feedback
   SubmitFeedbackFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -298,7 +346,25 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           FEEDBACK_TABLE_NAME: !Ref FeedbackTable
@@ -308,7 +374,6 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # Function for Basic Internal Analytics/KPIs
   GetAnalyticsFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -317,7 +382,25 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt LambdaExecutionRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           ORDERS_TABLE_NAME: !Ref OrdersTable
@@ -328,11 +411,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
-  # --- NO API GATEWAY RESOURCES DEFINED ---
-  # --- NO LAMBDA PERMISSIONS FOR API GATEWAY DEFINED ---
-
 Outputs:
-  # No API Endpoint Output as API Gateway is not defined
   CognitoUserPoolId:
     Description: ID of the Cognito User Pool created
     Value: !Ref UserPool
