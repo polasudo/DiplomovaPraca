@@ -18,20 +18,12 @@ Resources:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: true
       EnableDnsHostnames: true
-      Tags:
-      - Key: Name
-        Value:
-          Fn::Sub: ${ProjectName}-VPC
-      - Key: Project
-        Value:
-          Ref: ProjectName
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
       - Key: Project
-        Value:
-          Ref: ProjectName
+        Value: myProject
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
@@ -50,13 +42,6 @@ Resources:
         - 0
         - Fn::GetAZs: ''
       MapPublicIpOnLaunch: true
-      Tags:
-      - Key: Name
-        Value:
-          Fn::Sub: ${ProjectName}-PublicSubnetA
-      - Key: Project
-        Value:
-          Ref: ProjectName
   PublicSubnetB:
     Type: AWS::EC2::Subnet
     Properties:
@@ -68,22 +53,11 @@ Resources:
         - 1
         - Fn::GetAZs: ''
       MapPublicIpOnLaunch: true
-      Tags:
-      - Key: Name
-        Value:
-          Fn::Sub: ${ProjectName}-PublicSubnetB
-      - Key: Project
-        Value:
-          Ref: ProjectName
   RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId:
         Ref: VPC
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
@@ -116,12 +90,8 @@ Resources:
       VpcId:
         Ref: VPC
       SecurityGroupEgress:
-      - CidrIp: '0.0.0.0/0'
-        IpProtocol: -1
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
+      - IpProtocol: -1
+        CidrIp: '0.0.0.0/0'
   ElastiCacheSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -136,10 +106,6 @@ Resources:
         ToPort: 6379
         SourceSecurityGroupId:
           Ref: LambdaSecurityGroup
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -154,10 +120,6 @@ Resources:
         ToPort: 5432
         SourceSecurityGroupId:
           Ref: LambdaSecurityGroup
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   CustomersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -170,10 +132,6 @@ Resources:
       - AttributeName: userId
         KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   OrdersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -195,10 +153,6 @@ Resources:
         Projection:
           ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   FeedbackTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -211,10 +165,6 @@ Resources:
       - AttributeName: feedbackId
         KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -251,10 +201,6 @@ Resources:
       SubnetIds:
       - Ref: PublicSubnetA
       - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   RedisCacheCluster:
     Type: AWS::ElastiCache::CacheCluster
     Properties:
@@ -269,10 +215,6 @@ Resources:
         - GroupId
       ClusterName:
         Fn::Sub: ${ProjectName}-redis-cluster
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   RDSDbSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
@@ -280,10 +222,6 @@ Resources:
       SubnetIds:
       - Ref: PublicSubnetA
       - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   DBPasswordSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -292,16 +230,14 @@ Resources:
       Description:
         Fn::Sub: Password for ${ProjectName} RDS instance
       GenerateSecretString:
-        SecretStringTemplate: '{"username": "dbadmin"}'
+        SecretStringTemplate: '{"username":"dbadmin"}'
         GenerateStringKey: password
         PasswordLength: 16
         ExcludePunctuation: true
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   AnalyticsDBInstance:
     Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
     Properties:
       DBInstanceIdentifier:
         Fn::Sub: ${ProjectName}-analytics-db
@@ -334,12 +270,6 @@ Resources:
       BackupRetentionPeriod: 7
       DeleteAutomatedBackups: true
       DeletionProtection: false
-      CopyTagsToSnapshot: true
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
-    DeletionPolicy: Snapshot
   AuthLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -355,6 +285,28 @@ Resources:
       Policies:
       - PolicyName:
           Fn::Sub: ${ProjectName}-AuthLambdaBasePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            - ec2:AssignPrivateIpAddresses
+            - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
       - PolicyName:
           Fn::Sub: ${ProjectName}-AuthLambdaCognitoPolicy
         PolicyDocument:
@@ -378,10 +330,6 @@ Resources:
               Fn::GetAtt:
               - CustomersTable
               - Arn
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   OrderLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -395,6 +343,30 @@ Resources:
             Service: lambda.amazonaws.com
           Action: sts:AssumeRole
       Policies:
+      - PolicyName:
+          Fn::Sub: ${ProjectName}-OrderLambdaBasePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            - ec2:AssignPrivateIpAddresses
+            - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
       - PolicyName:
           Fn::Sub: ${ProjectName}-OrderLambdaDynamoDBPolicy
         PolicyDocument:
@@ -412,10 +384,6 @@ Resources:
               - OrdersTable
               - Arn
             - Fn::Sub: ${OrdersTable.Arn}/index/UserOrdersIndex
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   FeedbackLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -430,6 +398,30 @@ Resources:
           Action: sts:AssumeRole
       Policies:
       - PolicyName:
+          Fn::Sub: ${ProjectName}-FeedbackLambdaBasePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            - ec2:AssignPrivateIpAddresses
+            - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
+      - PolicyName:
           Fn::Sub: ${ProjectName}-FeedbackLambdaDynamoDBPolicy
         PolicyDocument:
           Version: '2012-10-17'
@@ -441,10 +433,6 @@ Resources:
               Fn::GetAtt:
               - FeedbackTable
               - Arn
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   AnalyticsLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -458,6 +446,30 @@ Resources:
             Service: lambda.amazonaws.com
           Action: sts:AssumeRole
       Policies:
+      - PolicyName:
+          Fn::Sub: ${ProjectName}-AnalyticsLambdaBasePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            - ec2:AssignPrivateIpAddresses
+            - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
       - PolicyName:
           Fn::Sub: ${ProjectName}-AnalyticsLambdaDynamoDBPolicy
         PolicyDocument:
@@ -485,10 +497,6 @@ Resources:
             Action: secretsmanager:GetSecretValue
             Resource:
               Ref: DBPasswordSecret
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   PaymentStepLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -501,6 +509,31 @@ Resources:
           Principal:
             Service: lambda.amazonaws.com
           Action: sts:AssumeRole
+      Policies:
+      - PolicyName:
+          Fn::Sub: ${ProjectName}-PaymentStepLambdaBasePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            - ec2:AssignPrivateIpAddresses
+            - ec2:UnassignPrivateIpAddresses
+            Resource: '*'
   StateMachineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -521,8 +554,7 @@ Resources:
           Version: '2012-10-17'
           Statement:
           - Effect: Allow
-            Action:
-            - lambda:InvokeFunction
+            Action: lambda:InvokeFunction
             Resource:
             - Fn::GetAtt:
               - PaymentStepLambdaFunction
@@ -539,10 +571,35 @@ Resources:
             - xray:GetSamplingRules
             - xray:GetSamplingTargets
             Resource: '*'
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
+  ApiGatewayLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: apigateway.amazonaws.com
+          Action: sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: ApiGatewayCloudWatchLogs
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn:
+        Fn::GetAtt:
+        - ApiGatewayLogsRole
+        - Arn
   RegisterUserFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -557,13 +614,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           COGNITO_USER_POOL_ID:
@@ -582,10 +639,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   LoginUserFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -600,13 +653,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           COGNITO_USER_POOL_ID:
@@ -623,10 +676,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   CreateOrderFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -641,13 +690,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           TABLE_NAME:
@@ -670,10 +719,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   GetOrdersFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -688,13 +733,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           TABLE_NAME:
@@ -718,10 +763,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   GetOrderDetailsFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -736,13 +777,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           TABLE_NAME:
@@ -765,10 +806,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   SubmitFeedbackFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -783,13 +820,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           TABLE_NAME:
@@ -804,10 +841,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   GetAnalyticsFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -822,13 +855,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           ORDERS_TABLE:
@@ -857,10 +890,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   PaymentStepLambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -875,13 +904,13 @@ Resources:
       Code:
         ZipFile: "import json\nimport os\nimport logging\n\nlogger = logging.getLogger()\n\
           logger.setLevel(logging.INFO)\n\ndef lambda_handler(event, context):\n \
-          \   logger.info(f\"Placeholder function '{context.function_name}' invoked.\"\
-          )\n    logger.info(\"Received event: \" + json.dumps(event, indent=2))\n\
-          \    return {\n        'statusCode': 200,\n        'headers': {\n      \
-          \      'Content-Type': 'application/json',\n            'Access-Control-Allow-Origin':\
-          \ '*'\n        },\n        'body': json.dumps({\n            'message':\
-          \ f'Placeholder success from {context.function_name}',\n            'received_event':\
-          \ event\n        })\n    }"
+          \   function_name = context.function_name\n    logger.info(f\"Placeholder\
+          \ function '{function_name}' invoked.\")\n    logger.info(\"Received event:\
+          \ \" + json.dumps(event, indent=2))\n\n    # Example accessing env vars\
+          \ (uncomment if needed)\n    # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')\n\
+          \n    return {\n        'statusCode': 200,\n        'body': json.dumps({\n\
+          \            'message': f'Placeholder success from {function_name}',\n \
+          \           'received_event': event\n        })\n    }\n"
       Environment:
         Variables:
           EXAMPLE_VAR: PaymentStepValue
@@ -895,10 +924,6 @@ Resources:
         SubnetIds:
         - Ref: PublicSubnetA
         - Ref: PublicSubnetB
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   PaymentProcessingStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -926,10 +951,6 @@ Resources:
           ,\n      \"End\": true\n    }\n  }\n}"
       TracingConfiguration:
         Enabled: true
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   RestApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -939,10 +960,6 @@ Resources:
       EndpointConfiguration:
         Types:
         - REGIONAL
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   CognitoAuthorizer:
     Type: AWS::ApiGateway::Authorizer
     Properties:
@@ -959,18 +976,18 @@ Resources:
   RootOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
-      AuthorizationType: NONE
-      HttpMethod: OPTIONS
+      RestApiId:
+        Ref: RestApi
       ResourceId:
         Fn::GetAtt:
         - RestApi
         - RootResourceId
-      RestApiId:
-        Ref: RestApi
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
       Integration:
         Type: MOCK
         RequestTemplates:
-          application/json: '{"statusCode": 200}'
+          application/json: '{"statusCode":200}'
         IntegrationResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -1021,7 +1038,7 @@ Resources:
       Integration:
         Type: MOCK
         RequestTemplates:
-          application/json: '{"statusCode": 200}'
+          application/json: '{"statusCode":200}'
         IntegrationResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -1072,7 +1089,7 @@ Resources:
       Integration:
         Type: MOCK
         RequestTemplates:
-          application/json: '{"statusCode": 200}'
+          application/json: '{"statusCode":200}'
         IntegrationResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -1141,7 +1158,7 @@ Resources:
       Integration:
         Type: MOCK
         RequestTemplates:
-          application/json: '{"statusCode": 200}'
+          application/json: '{"statusCode":200}'
         IntegrationResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -1194,7 +1211,7 @@ Resources:
       Integration:
         Type: MOCK
         RequestTemplates:
-          application/json: '{"statusCode": 200}'
+          application/json: '{"statusCode":200}'
         IntegrationResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -1247,7 +1264,7 @@ Resources:
       Integration:
         Type: MOCK
         RequestTemplates:
-          application/json: '{"statusCode": 200}'
+          application/json: '{"statusCode":200}'
         IntegrationResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -1300,7 +1317,7 @@ Resources:
       Integration:
         Type: MOCK
         RequestTemplates:
-          application/json: '{"statusCode": 200}'
+          application/json: '{"statusCode":200}'
         IntegrationResponses:
         - StatusCode: 200
           ResponseParameters:
@@ -1330,6 +1347,7 @@ Resources:
         Ref: RestApi
   ApiStage:
     Type: AWS::ApiGateway::Stage
+    DependsOn: ApiGatewayAccount
     Properties:
       StageName: showcase
       RestApiId:
@@ -1345,10 +1363,6 @@ Resources:
         ThrottlingBurstLimit: 100
         ThrottlingRateLimit: 50
       TracingEnabled: true
-      Tags:
-      - Key: Project
-        Value:
-          Ref: ProjectName
   RegisterLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -1430,7 +1444,16 @@ Outputs:
   ApiEndpoint:
     Description: The invoke URL for the API Gateway stage (Showcase)
     Value:
-      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage.StageName}
+      Fn::Join:
+      - ''
+      - - https://
+        - Ref: RestApi
+        - .execute-api.
+        - Ref: AWS::Region
+        - .amazonaws.com/
+        - Fn::GetAtt:
+          - ApiStage
+          - StageName
   CognitoUserPoolId:
     Description: ID of the Cognito User Pool
     Value:

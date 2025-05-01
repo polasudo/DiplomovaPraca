@@ -14,7 +14,6 @@ Parameters:
     Description: Name for the RDS database master password secret in Secrets Manager.
 
 Resources:
-
   ### VPC & Networking ###
   VPC:
     Type: AWS::EC2::VPC
@@ -22,18 +21,13 @@ Resources:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: true
       EnableDnsHostnames: true
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-VPC"
-        - Key: Project
-          Value: !Ref ProjectName
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Project
-          Value: !Ref ProjectName
+          Value: myProject
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -48,11 +42,6 @@ Resources:
       CidrBlock: 10.0.1.0/24
       AvailabilityZone: !Select [0, !GetAZs ""]
       MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-PublicSubnetA"
-        - Key: Project
-          Value: !Ref ProjectName
 
   PublicSubnetB:
     Type: AWS::EC2::Subnet
@@ -61,19 +50,12 @@ Resources:
       CidrBlock: 10.0.2.0/24
       AvailabilityZone: !Select [1, !GetAZs ""]
       MapPublicIpOnLaunch: true
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-PublicSubnetB"
-        - Key: Project
-          Value: !Ref ProjectName
-
+  
   RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   PublicRoute:
     Type: AWS::EC2::Route
@@ -105,9 +87,7 @@ Resources:
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   ElastiCacheSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -120,9 +100,7 @@ Resources:
           FromPort: 6379
           ToPort: 6379
           SourceSecurityGroupId: !Ref LambdaSecurityGroup
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -135,9 +113,7 @@ Resources:
           FromPort: 5432
           ToPort: 5432
           SourceSecurityGroupId: !Ref LambdaSecurityGroup
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   ### DynamoDB ###
   CustomersTable:
@@ -151,9 +127,7 @@ Resources:
         - AttributeName: userId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   OrdersTable:
     Type: AWS::DynamoDB::Table
@@ -175,9 +149,7 @@ Resources:
           Projection:
             ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   FeedbackTable:
     Type: AWS::DynamoDB::Table
@@ -190,9 +162,7 @@ Resources:
         - AttributeName: feedbackId
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   ### Cognito ###
   UserPool:
@@ -231,9 +201,7 @@ Resources:
       SubnetIds:
         - !Ref PublicSubnetA
         - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   RedisCacheCluster:
     Type: AWS::ElastiCache::CacheCluster
@@ -245,9 +213,7 @@ Resources:
       VpcSecurityGroupIds:
         - !GetAtt ElastiCacheSecurityGroup.GroupId
       ClusterName: !Sub "${ProjectName}-redis-cluster"
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   ### RDS & Secrets ###
   RDSDbSubnetGroup:
@@ -257,9 +223,7 @@ Resources:
       SubnetIds:
         - !Ref PublicSubnetA
         - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   DBPasswordSecret:
     Type: AWS::SecretsManager::Secret
@@ -271,13 +235,12 @@ Resources:
         GenerateStringKey: password
         PasswordLength: 16
         ExcludePunctuation: true
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   AnalyticsDBInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
     Properties:
       DBInstanceIdentifier: !Sub "${ProjectName}-analytics-db"
       DBName: !Sub "${ProjectName}AnalyticsDB"
@@ -295,10 +258,7 @@ Resources:
       BackupRetentionPeriod: 7
       DeleteAutomatedBackups: true
       DeletionProtection: false
-      CopyTagsToSnapshot: true
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   ### IAM Roles ###
   AuthLambdaRole:
@@ -557,7 +517,8 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: lambda:InvokeFunction
-                Resource: !GetAtt PaymentStepLambdaFunction.Arn
+                Resource:
+                  - !GetAtt PaymentStepLambdaFunction.Arn
         - PolicyName: !Sub "${ProjectName}-StateMachineXRayPolicy"
           PolicyDocument:
             Version: '2012-10-17'
@@ -569,34 +530,36 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
+  ApiGatewayLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: ApiGatewayCloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayLogsRole.Arn
 
   ### Lambda Functions (placeholders) ###
-  SharedPlaceholderFunctionCode: &SharedPlaceholderFunctionCode |-
-    import json
-    import os
-    import logging
-
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-
-    def lambda_handler(event, context):
-        logger.info(f"Placeholder function '{context.function_name}' invoked.")
-        logger.info("Received event: " + json.dumps(event, indent=2))
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({
-                'message': f'Placeholder success from {context.function_name}',
-                'received_event': event
-            })
-        }
-
   RegisterUserFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -605,7 +568,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt AuthLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
@@ -621,9 +606,6 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
 
   LoginUserFunction:
     Type: AWS::Lambda::Function
@@ -633,7 +615,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt AuthLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref UserPool
@@ -648,9 +652,7 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   CreateOrderFunction:
     Type: AWS::Lambda::Function
@@ -660,7 +662,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt OrderLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           TABLE_NAME:     !Ref OrdersTable
@@ -676,9 +700,7 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   GetOrdersFunction:
     Type: AWS::Lambda::Function
@@ -688,7 +710,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt OrderLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           TABLE_NAME:     !Ref OrdersTable
@@ -705,9 +749,7 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   GetOrderDetailsFunction:
     Type: AWS::Lambda::Function
@@ -717,7 +759,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt OrderLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           TABLE_NAME:     !Ref OrdersTable
@@ -733,9 +797,7 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   SubmitFeedbackFunction:
     Type: AWS::Lambda::Function
@@ -745,7 +807,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt FeedbackLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           TABLE_NAME: !Ref FeedbackTable
@@ -759,9 +843,7 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   GetAnalyticsFunction:
     Type: AWS::Lambda::Function
@@ -771,7 +853,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt AnalyticsLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           ORDERS_TABLE:    !Ref OrdersTable
@@ -790,9 +894,7 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   PaymentStepLambdaFunction:
     Type: AWS::Lambda::Function
@@ -802,7 +904,29 @@ Resources:
       Runtime: python3.11
       Role: !GetAtt PaymentStepLambdaRole.Arn
       Code:
-        ZipFile: *SharedPlaceholderFunctionCode
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
       Environment:
         Variables:
           EXAMPLE_VAR: "PaymentStepValue"
@@ -816,9 +940,6 @@ Resources:
         SubnetIds:
           - !Ref PublicSubnetA
           - !Ref PublicSubnetB
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
 
   ### Step Functions ###
   PaymentProcessingStateMachine:
@@ -865,9 +986,6 @@ Resources:
         }
       TracingConfiguration:
         Enabled: true
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
 
   ### API Gateway ###
   RestApi:
@@ -877,9 +995,7 @@ Resources:
       Description: "(SHOWCASE ONLY) Scaled API structure for Serverless App"
       EndpointConfiguration:
         Types: [REGIONAL]
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   CognitoAuthorizer:
     Type: AWS::ApiGateway::Authorizer
@@ -1070,7 +1186,7 @@ Resources:
     Type: AWS::ApiGateway::Resource
     Properties:
       RestApiId: !Ref RestApi
-      ParentId: !GetAtt OrdersResource
+      ParentId: !Ref OrdersResource
       PathPart: "{orderId}"
 
   OrderByIdGetMethod:
@@ -1221,6 +1337,7 @@ Resources:
 
   ApiStage:
     Type: AWS::ApiGateway::Stage
+    DependsOn: ApiGatewayAccount
     Properties:
       StageName: showcase
       RestApiId: !Ref RestApi
@@ -1234,9 +1351,7 @@ Resources:
           ThrottlingBurstLimit: 100
           ThrottlingRateLimit: 50
       TracingEnabled: true
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
+
 
   ### Lambda Permissions ###
   RegisterLambdaPermission:
@@ -1298,7 +1413,14 @@ Resources:
 Outputs:
   ApiEndpoint:
     Description: The invoke URL for the API Gateway stage (Showcase)
-    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage.StageName}"
+    Value: !Join
+      - ""
+      - - "https://"
+        - !Ref RestApi
+        - ".execute-api."
+        - !Ref "AWS::Region"
+        - ".amazonaws.com/"
+        - !GetAtt ApiStage.StageName
   CognitoUserPoolId:
     Description: ID of the Cognito User Pool
     Value: !Ref UserPool
