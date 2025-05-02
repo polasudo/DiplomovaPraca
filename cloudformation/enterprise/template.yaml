@@ -1,0 +1,1693 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  (SHOWCASE ONLY - NO FUNCTIONAL LOGIC) CloudFormation template demonstrating a
+  scaled serverless backend structure based on the "Maturation" text. Includes API Gateway,
+  Lambda (placeholders with specific roles), DynamoDB, Cognito, Step Functions, RDS (PostgreSQL),
+  ElastiCache (Redis), and basic VPC. Lambdas are non-functional placeholders.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: A prefix for resource names to ensure uniqueness and grouping.
+  DbPasswordSecretName:
+    Type: String
+    Description: Name for the RDS database master password secret in Secrets Manager.
+
+Resources:
+  ### VPC & Networking ###
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Project
+          Value: myProject
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+  
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref RouteTable
+
+  SubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref RouteTable
+
+  ### Security Groups ###
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-LambdaSG"
+      GroupDescription: Security group for Lambda functions running in VPC
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+
+  ElastiCacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-ElastiCacheSG"
+      GroupDescription: Security group for ElastiCache Redis Cluster
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-RDSSG"
+      GroupDescription: Security group for RDS PostgreSQL Instance
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+
+  ### DynamoDB ###
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-Customers"
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-Orders"
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserOrdersIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+
+  FeedbackTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-Feedback"
+      AttributeDefinitions:
+        - AttributeName: feedbackId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: feedbackId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+
+  ### Cognito ###
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-UserPool"
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${ProjectName}-WebAppClient"
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+  ### ElastiCache ###
+  ElastiCacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet group for ElastiCache cluster
+      SubnetIds:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+
+
+  RedisCacheCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      CacheNodeType: cache.t3.micro
+      Engine: redis
+      NumCacheNodes: 1
+      CacheSubnetGroupName: !Ref ElastiCacheSubnetGroup
+      VpcSecurityGroupIds:
+        - !GetAtt ElastiCacheSecurityGroup.GroupId
+      ClusterName: !Sub "${ProjectName}-redis-cluster"
+
+
+  ### RDS & Secrets ###
+  RDSDbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS instance
+      SubnetIds:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+
+
+  DBPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref DbPasswordSecretName
+      Description: !Sub "Password for ${ProjectName} RDS instance"
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"dbadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 16
+        ExcludePunctuation: true
+
+
+  AnalyticsDBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-analytics-db"
+      DBName: !Sub "${ProjectName}AnalyticsDB"
+      Engine: postgres
+      EngineVersion: "15"
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: "20"
+      MasterUsername: !Join ["", ["{{resolve:secretsmanager:", !Ref DBPasswordSecret, ":SecretString:username}}"]]
+      MasterUserPassword: !Join ["", ["{{resolve:secretsmanager:", !Ref DBPasswordSecret, ":SecretString:password}}"]]
+      DBSubnetGroupName: !Ref RDSDbSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      PubliclyAccessible: false
+      StorageType: gp3
+      BackupRetentionPeriod: 7
+      DeleteAutomatedBackups: true
+      DeletionProtection: false
+
+
+  ### IAM Roles ###
+  AuthLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-AuthLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-AuthLambdaBasePolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+        - PolicyName: !Sub "${ProjectName}-AuthLambdaCognitoPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminInitiateAuth
+                  - cognito-idp:AdminRespondToAuthChallenge
+                  - cognito-idp:SignUp
+                  - cognito-idp:ConfirmSignUp
+                Resource: !GetAtt UserPool.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt CustomersTable.Arn
+
+  OrderLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-OrderLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-OrderLambdaBasePolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+        - PolicyName: !Sub "${ProjectName}-OrderLambdaDynamoDBPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt OrdersTable.Arn
+                  - !Sub "${OrdersTable.Arn}/index/UserOrdersIndex"
+
+  FeedbackLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-FeedbackLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-FeedbackLambdaBasePolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+        - PolicyName: !Sub "${ProjectName}-FeedbackLambdaDynamoDBPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt FeedbackTable.Arn
+
+  AnalyticsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-AnalyticsLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-AnalyticsLambdaBasePolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+        - PolicyName: !Sub "${ProjectName}-AnalyticsLambdaDynamoDBPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                Resource:
+                  - !GetAtt CustomersTable.Arn
+                  - !GetAtt OrdersTable.Arn
+                  - !Sub "${OrdersTable.Arn}/index/*"
+        - PolicyName: !Sub "${ProjectName}-AnalyticsLambdaRDSPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DBPasswordSecret
+
+  PaymentStepLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-PaymentStepLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-PaymentStepLambdaBasePolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-StateMachineRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "states.${AWS::Region}.amazonaws.com"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-StateMachineLambdaInvokePolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt PaymentStepLambdaFunction.Arn
+        - PolicyName: !Sub "${ProjectName}-StateMachineXRayPolicy"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
+
+  ApiGatewayLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayLogsRole.Arn
+
+  ### Lambda Functions (placeholders) ###
+  RegisterUserFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-RegisterUser"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt AuthLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID:    !Ref UserPoolClient
+          CUSTOMERS_TABLE_NAME: !Ref CustomersTable
+      Timeout: 15
+      MemorySize: 128
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+  LoginUserFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-LoginUser"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt AuthLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID:    !Ref UserPoolClient
+      Timeout: 15
+      MemorySize: 128
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+
+  CreateOrderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-CreateOrder"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt OrderLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          TABLE_NAME:     !Ref OrdersTable
+          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
+          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
+      Timeout: 15
+      MemorySize: 128
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+
+  GetOrdersFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-GetOrders"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt OrderLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          TABLE_NAME:     !Ref OrdersTable
+          INDEX_NAME:     UserOrdersIndex
+          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
+          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
+      Timeout: 15
+      MemorySize: 128
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+
+  GetOrderDetailsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-GetOrderDetails"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt OrderLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          TABLE_NAME:     !Ref OrdersTable
+          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
+          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
+      Timeout: 15
+      MemorySize: 128
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+
+  SubmitFeedbackFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-SubmitFeedback"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt FeedbackLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FeedbackTable
+      Timeout: 15
+      MemorySize: 128
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+
+  GetAnalyticsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-GetAnalytics"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt AnalyticsLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          ORDERS_TABLE:    !Ref OrdersTable
+          CUSTOMERS_TABLE: !Ref CustomersTable
+          RDS_ENDPOINT:    !GetAtt AnalyticsDBInstance.Endpoint.Address
+          RDS_PORT:        !GetAtt AnalyticsDBInstance.Endpoint.Port
+          RDS_DB_NAME:     !Sub "${ProjectName}AnalyticsDB"
+          RDS_SECRET_ARN:  !Ref DBPasswordSecret
+      Timeout: 60
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+
+  PaymentStepLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-PaymentStepPlaceholder"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt PaymentStepLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              function_name = context.function_name
+              logger.info(f"Placeholder function '{function_name}' invoked.")
+              logger.info("Received event: " + json.dumps(event, indent=2))
+
+              # Example accessing env vars (uncomment if needed)
+              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': f'Placeholder success from {function_name}',
+                      'received_event': event
+                  })
+              }
+      Environment:
+        Variables:
+          EXAMPLE_VAR: "PaymentStepValue"
+      Timeout: 30
+      MemorySize: 128
+      TracingConfig:
+        Mode: Active
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+
+  ### Step Functions ###
+  PaymentProcessingStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${ProjectName}-PaymentProcessor"
+      RoleArn: !GetAtt StateMachineRole.Arn
+      DefinitionString: !Sub |-
+        {
+          "Comment": "Placeholder Payment Processing Workflow based on Scale-up text",
+          "StartAt": "ValidatePayment",
+          "States": {
+            "ValidatePayment": {
+              "Type": "Task",
+              "Resource": "${PaymentStepLambdaFunction.Arn}",
+              "Next": "ProcessExternally"
+            },
+            "ProcessExternally": {
+              "Type": "Task",
+              "Resource": "${PaymentStepLambdaFunction.Arn}",
+              "Retry": [{
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 3,
+                "MaxAttempts": 2,
+                "BackoffRate": 1.5
+              }],
+              "Catch": [{
+                "ErrorEquals": ["States.ALL"],
+                "Next": "PaymentFailedNotification"
+              }],
+              "Next": "UpdateOrderStatus"
+            },
+            "UpdateOrderStatus": {
+              "Type": "Task",
+              "Resource": "${PaymentStepLambdaFunction.Arn}",
+              "End": true
+            },
+            "PaymentFailedNotification": {
+              "Type": "Task",
+              "Resource": "${PaymentStepLambdaFunction.Arn}",
+              "End": true
+            }
+          }
+        }
+      TracingConfiguration:
+        Enabled: true
+
+  ### API Gateway ###
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${ProjectName}-Api"
+      Description: "(SHOWCASE ONLY) Scaled API structure for Serverless App"
+      EndpointConfiguration:
+        Types: [REGIONAL]
+
+
+  CognitoAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: !Sub "${ProjectName}-CognitoAuthorizer"
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref RestApi
+      ProviderARNs:
+        - !GetAtt UserPool.Arn
+
+  RootOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !GetAtt RestApi.RootResourceId
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  RegisterResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: register
+
+  RegisterPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RegisterResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RegisterUserFunction.Arn}/invocations
+
+  RegisterOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref RegisterResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  LoginResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: login
+
+  LoginPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref LoginResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LoginUserFunction.Arn}/invocations
+
+  LoginOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref LoginResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  OrdersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: orders
+
+  OrdersPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrdersResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateOrderFunction.Arn}/invocations
+
+  OrdersGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrdersResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOrdersFunction.Arn}/invocations
+
+  OrdersOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrdersResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  OrderByIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !Ref OrdersResource
+      PathPart: "{orderId}"
+
+  OrderByIdGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrderByIdResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      RequestParameters:
+        method.request.path.orderId: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOrderDetailsFunction.Arn}/invocations
+
+  OrderByIdOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref OrderByIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  FeedbackResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: feedback
+
+  FeedbackPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref FeedbackResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SubmitFeedbackFunction.Arn}/invocations
+
+  FeedbackOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref FeedbackResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  AnalyticsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: analytics
+
+  AnalyticsGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref AnalyticsResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref CognitoAuthorizer
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAnalyticsFunction.Arn}/invocations
+
+  AnalyticsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref AnalyticsResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - RegisterPostMethod
+      - LoginPostMethod
+      - OrdersPostMethod
+      - OrdersGetMethod
+      - OrderByIdGetMethod
+      - FeedbackPostMethod
+      - AnalyticsGetMethod
+    Properties:
+      RestApiId: !Ref RestApi
+      StageName: showcase              # creates “showcase”
+      StageDescription:                # configures it
+        TracingEnabled: true
+        MethodSettings:
+          - ResourcePath: '/*'
+            HttpMethod: '*'
+            LoggingLevel: INFO
+            MetricsEnabled: true
+            DataTraceEnabled: false
+            ThrottlingBurstLimit: 100
+            ThrottlingRateLimit: 50
+
+
+  ### Lambda Permissions ###
+  RegisterLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt RegisterUserFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/POST/register
+
+  LoginLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt LoginUserFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/POST/login
+
+  CreateOrderLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CreateOrderFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/POST/orders
+
+  GetOrdersLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetOrdersFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/GET/orders
+
+  GetOrderDetailsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetOrderDetailsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/GET/orders/*
+
+  SubmitFeedbackLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SubmitFeedbackFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/POST/feedback
+
+  GetAnalyticsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetAnalyticsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/GET/analytics
+
+  ############################################
+  ## 1) ASYNCHRONOUS & REAL-TIME INTEGRATION ##
+  ############################################
+
+  # # EventBridge bus for cross-service events
+  # EnterpriseEventBus:
+  #   Type: AWS::Events::EventBus
+  #   Properties:
+  #     Name: !Sub "${ProjectName}-EnterpriseBus"
+
+  # # Route all order-related events to the bus
+  # OrdersEventRule:
+  #   Type: AWS::Events::Rule
+  #   Properties:
+  #     Name: !Sub "${ProjectName}-OrderEventsRule"
+  #     EventBusName: !Ref EnterpriseEventBus
+  #     EventPattern:
+  #       source:
+  #         - "com.mycompany.orders"
+  #     Targets:
+  #       - Arn: !GetAtt MyOrderProcessorLambda.Arn
+  #         Id: "EnterpriseBusTarget"
+
+  # AppSync GraphQL API for real-time subscriptions
+  AppSyncGraphQLApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: !Sub "${ProjectName}-RealtimeAPI"
+      AuthenticationType: AMAZON_COGNITO_USER_POOLS
+      UserPoolConfig:
+        AwsRegion: !Ref "AWS::Region"
+        DefaultAction: ALLOW
+        UserPoolId: !Ref UserPool
+
+  AppSyncGraphQLSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId: 
+        Fn::GetAtt:
+          - AppSyncGraphQLApi
+          - ApiId
+      Definition: |
+        type Order {
+          orderId:   ID!
+          status:    String!
+          updatedAt: AWSDateTime
+        }
+        type Query {
+          getOrder(orderId: ID!): Order
+        }
+        type Mutation {
+          updateOrderStatus(orderId: ID!, newStatus: String!): Order
+        }
+        type Subscription {
+          onOrderUpdated: Order
+            @aws_subscribe(mutations: ["updateOrderStatus"])
+        }
+        schema {
+          query:        Query
+          mutation:     Mutation
+          subscription: Subscription
+        }
+
+  AppSyncDataSourceOrders:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+          - AppSyncGraphQLApi
+          - ApiId
+      Name: OrdersTableDS
+      Type: AMAZON_DYNAMODB
+      DynamoDBConfig:
+        TableName: !Ref OrdersTable
+        AwsRegion: !Ref "AWS::Region"
+      ServiceRoleArn: !GetAtt AuthLambdaRole.Arn
+
+  ####################################
+  ## 2) ENTERPRISE-GRADE SECURITY   ##
+  ####################################
+
+  # WAFv2 WebACL (managed rule group)
+  ApiWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub "${ProjectName}-api-waf"
+      Scope: REGIONAL
+      DefaultAction: 
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${ProjectName}-api-waf-metric"
+      Rules:
+        - Name: AWSManagedCommonRules
+          Priority: 0
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          OverrideAction: { None: {} }
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSCommon
+
+  # Associate WAF with your API Gateway
+  ApiGatewayWAFAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    DependsOn: ApiDeployment
+    Properties:
+      WebACLArn: !GetAtt ApiWebACL.Arn
+
+      ResourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${RestApi}/stages/showcase"
+
+  # # Shield Advanced protection on the API stage
+  # ShieldApiProtection:
+  #   Type: AWS::Shield::Protection
+  #   Properties:
+  #     Name: !Sub "${ProjectName}-ApiShield"
+  #     ResourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/showcase/*"
+
+  # Inspector assessment (classic) to run on all EC2/Lambda roles
+  InspectorResourceGroup:
+    Type: AWS::Inspector::ResourceGroup
+    Properties:
+      ResourceGroupTags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  InspectorAssessmentTarget:
+    Type: AWS::Inspector::AssessmentTarget
+    Properties:
+      AssessmentTargetName: !Sub "${ProjectName}-InspectorTarget"
+      ResourceGroupArn: !GetAtt InspectorResourceGroup.Arn
+
+  InspectorAssessmentTemplate:
+    Type: AWS::Inspector::AssessmentTemplate
+    Properties:
+      AssessmentTargetArn: !Ref InspectorAssessmentTarget
+      DurationInSeconds: 3600
+      RulesPackageArns:
+        - arn:aws:inspector:eu-central-1:537503971621:rulespackage/0-wNqHa8M9
+
+
+  #############################################
+  ## 3) RELATIONAL & ANALYTICS DATA LAYER   ##
+  #############################################
+
+  RedshiftSubnetGroup:
+    Type: AWS::Redshift::ClusterSubnetGroup
+    Properties:
+      Description: Subnet group for enterprise Redshift cluster
+      SubnetIds:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+
+  # Aurora Serverless v2 cluster for complex relational workloads
+  # AuroraServerlessCluster:
+  #   Type: AWS::RDS::DBCluster
+  #   Properties:
+  #     Engine: aurora-postgresql
+  #     EngineMode: serverless
+  #     DBClusterIdentifier: !Sub "${ProjectName}-AuroraCluster"
+  #     ScalingConfiguration:
+  #       AutoPause: true
+  #       MinCapacity: 2
+  #       MaxCapacity: 16
+  #       SecondsUntilAutoPause: 900
+  #     MasterUsername: !Join ["", ["{{resolve:secretsmanager:", !Ref DBPasswordSecret, ":SecretString:username}}"]]
+  #     MasterUserPassword: !Join ["", ["{{resolve:secretsmanager:", !Ref DBPasswordSecret, ":SecretString:password}}"]]
+  #     DBSubnetGroupName: !Ref RDSDbSubnetGroup
+  #     VpcSecurityGroupIds: [ !GetAtt RDSSecurityGroup.GroupId ]
+
+  # Redshift data warehouse for large-scale analytics
+  AnalyticsRedshiftCluster:
+    Type: AWS::Redshift::Cluster
+    Properties:
+      ClusterIdentifier: !Sub "${ProjectName}-redshift"
+      ClusterSubnetGroupName: !Ref RedshiftSubnetGroup
+      NodeType: dc2.large
+      NumberOfNodes: 2
+      MasterUsername: redshiftadmin
+      MasterUserPassword: "S3cur3Passw0rd1"
+      DBName: analyticsdw
+      ClusterType: multi-node
+      VpcSecurityGroupIds: [ !GetAtt RDSSecurityGroup.GroupId ]
+      PubliclyAccessible: false
+
+  # Glue job for ETL between Aurora/Redshift
+  AnalyticsGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-AnalyticsETL"
+      Role: !GetAtt AuthLambdaRole.Arn
+      Command:
+        Name: glueetl
+        ScriptLocation: s3://my-scripts-bucket/glue/analytics_etl.py
+      DefaultArguments:
+        "--TempDir": !Sub "s3://my-temp/${ProjectName}/"
+        "--job-bookmark-option": job-bookmark-enable
+
+  ##########################################
+  ## 4) CENTRALIZED OBSERVABILITY          ##
+  ##########################################
+
+  # OpenSearch domain for log analytics
+  LogsOpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: !Sub "${ProjectName}-logs"
+      EngineVersion: "OpenSearch_1.0"
+      ClusterConfig:
+        InstanceType: t3.small.search
+        InstanceCount: 1
+      EBSOptions:
+        EBSEnabled: true
+        VolumeSize: 10
+
+  # CloudWatch Dashboard tracking key metrics
+  EnterpriseDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${ProjectName}-EnterpriseDash"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type":"metric",
+              "x":0,"y":0,"width":12,"height":6,
+              "properties":{
+                "metrics":[["AWS/Lambda","Errors","FunctionName","${CreateOrderFunction}"]],
+                "period":300,"stat":"Sum","region":"${AWS::Region}"
+              }
+            },
+            {
+              "type":"metric",
+              "x":12,"y":0,"width":12,"height":6,
+              "properties":{
+                "metrics":[["AWS/ApiGateway","Count","ApiName","${RestApi}"]],
+                "period":300,"stat":"Sum","region":"${AWS::Region}"
+              }
+            }
+          ]
+        }
+
+
+Outputs:
+  ApiEndpoint:
+    Description: Invoke URL for the API Gateway stage
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/showcase"
+  CognitoUserPoolId:
+    Description: ID of the Cognito User Pool
+    Value: !Ref UserPool
+  CognitoUserPoolClientId:
+    Description: ID of the Cognito User Pool Client
+    Value: !Ref UserPoolClient
+  CustomersTableName:
+    Description: Name of the DynamoDB table for Customers
+    Value: !Ref CustomersTable
+  OrdersTableName:
+    Description: Name of the DynamoDB table for Orders
+    Value: !Ref OrdersTable
+  FeedbackTableName:
+    Description: Name of the DynamoDB table for Feedback
+    Value: !Ref FeedbackTable
+  PaymentStateMachineArn:
+    Description: ARN of the placeholder Payment Processing Step Functions State Machine
+    Value: !Ref PaymentProcessingStateMachine
+  RedisCacheEndpoint:
+    Description: Endpoint address for the ElastiCache Redis cluster
+    Value: !GetAtt RedisCacheCluster.RedisEndpoint.Address
+  RedisCachePort:
+    Description: Endpoint port for the ElastiCache Redis cluster
+    Value: !GetAtt RedisCacheCluster.RedisEndpoint.Port
+  AnalyticsDBEndpoint:
+    Description: Endpoint address for the RDS PostgreSQL analytics database
+    Value: !GetAtt AnalyticsDBInstance.Endpoint.Address
+  AnalyticsDBPort:
+    Description: Endpoint port for the RDS PostgreSQL analytics database
+    Value: !GetAtt AnalyticsDBInstance.Endpoint.Port
+  AnalyticsDBName:
+    Description: Name of the RDS PostgreSQL analytics database
+    Value: !Sub "${ProjectName}AnalyticsDB"
+  DBPasswordSecretArn:
+    Description: ARN of the Secrets Manager secret holding the RDS master password
+    Value: !Ref DBPasswordSecret
+  VpcId:
+    Description: ID of the created VPC
+    Value: !Ref VPC
+  PublicSubnetIds:
+    Description: IDs of the public subnets
+    Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
+  LambdaSecurityGroupId:
+    Description: ID of the Security Group used by Lambda functions
+    Value: !Ref LambdaSecurityGroup
