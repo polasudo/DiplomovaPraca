@@ -582,17 +582,8 @@ Resources:
             Service: apigateway.amazonaws.com
           Action: sts:AssumeRole
       Path: /
-      Policies:
-      - PolicyName: ApiGatewayCloudWatchLogs
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-            Resource: arn:aws:logs:*:*:*
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
   ApiGatewayAccount:
     Type: AWS::ApiGateway::Account
     Properties:
@@ -1345,24 +1336,17 @@ Resources:
     Properties:
       RestApiId:
         Ref: RestApi
-  ApiStage:
-    Type: AWS::ApiGateway::Stage
-    DependsOn: ApiGatewayAccount
-    Properties:
       StageName: showcase
-      RestApiId:
-        Ref: RestApi
-      DeploymentId:
-        Ref: ApiDeployment
-      MethodSettings:
-      - ResourcePath: /*
-        HttpMethod: '*'
-        LoggingLevel: INFO
-        MetricsEnabled: true
-        DataTraceEnabled: false
-        ThrottlingBurstLimit: 100
-        ThrottlingRateLimit: 50
-      TracingEnabled: true
+      StageDescription:
+        TracingEnabled: true
+        MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          MetricsEnabled: true
+          DataTraceEnabled: false
+          ThrottlingBurstLimit: 100
+          ThrottlingRateLimit: 50
   RegisterLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -1442,18 +1426,9 @@ Resources:
         Fn::Sub: arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/GET/analytics
 Outputs:
   ApiEndpoint:
-    Description: The invoke URL for the API Gateway stage (Showcase)
+    Description: Invoke URL for the API Gateway stage
     Value:
-      Fn::Join:
-      - ''
-      - - https://
-        - Ref: RestApi
-        - .execute-api.
-        - Ref: AWS::Region
-        - .amazonaws.com/
-        - Fn::GetAtt:
-          - ApiStage
-          - StageName
+      Fn::Sub: https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/showcase
   CognitoUserPoolId:
     Description: ID of the Cognito User Pool
     Value:

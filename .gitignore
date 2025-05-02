@@ -6,3 +6,4 @@ terraform/lambda/.terraform.tfstate.lock.info
 terraform/lambda/terraform.tfstate
 terraform/lambda/terraform.tfstate.backup
 /terraform/lambda/.terraform
+cloudformation/scale-up/.aws-sam/build/template.yaml
