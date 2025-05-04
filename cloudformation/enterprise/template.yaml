@@ -1510,13 +1510,6 @@ Resources:
 
       ResourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${RestApi}/stages/showcase"
 
-  # # Shield Advanced protection on the API stage
-  # ShieldApiProtection:
-  #   Type: AWS::Shield::Protection
-  #   Properties:
-  #     Name: !Sub "${ProjectName}-ApiShield"
-  #     ResourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/showcase/*"
-
   # Inspector assessment (classic) to run on all EC2/Lambda roles
   InspectorResourceGroup:
     Type: AWS::Inspector::ResourceGroup
@@ -1691,3 +1684,35 @@ Outputs:
   LambdaSecurityGroupId:
     Description: ID of the Security Group used by Lambda functions
     Value: !Ref LambdaSecurityGroup
+
+
+
+  # ############################################
+  # ## ASYNCHRONOUS & REAL-TIME INTEGRATION   ##
+  # ############################################
+
+  # EnterpriseEventBus:
+  #   Type: AWS::Events::EventBus
+  #   Properties:
+  #     Name: !Sub "${ProjectName}-EnterpriseBus"
+
+  # OrdersEventRule:
+  #   Type: AWS::Events::Rule
+  #   Properties:
+  #     Name: !Sub "${ProjectName}-OrderEventsRule"
+  #     EventBusName: !Ref EnterpriseEventBus
+  #     EventPattern:
+  #       source:
+  #         - "com.mycompany.orders"
+  #     Targets:
+  #       - Id: "CreateOrderLambda"
+  #         Arn: !GetAtt CreateOrderFunction.Arn
+
+  # # give EventBridge permission to invoke CreateOrderFunction
+  # CreateOrderEventPermission:
+  #   Type: AWS::Lambda::Permission
+  #   Properties:
+  #     FunctionName: !Ref CreateOrderFunction
+  #     Action: lambda:InvokeFunction
+  #     Principal: events.amazonaws.com
+  #     SourceArn: !GetAtt OrdersEventRule.Arn

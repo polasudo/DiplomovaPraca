@@ -1,0 +1,11 @@
+Security Checklist Example:
+
+Apply Principle of Least Privilege
+
+Regular IAM audits and reviews
+
+Enable CloudTrail for audit logging
+
+Configure API Gateway with strict input validation
+
+Enable AWS GuardDuty and Security Hub alerts
