@@ -4,7 +4,7 @@ import Navbar from "../../../components/Navbar";
 import Link from "next/link";
 
 const Page = () => {
-  const url = "https://ye03yy1hg3.execute-api.eu-central-1.amazonaws.com/v1";
+  const url = "https://ye03yy1hg3.execute-api.eu-central-1.amazonaws.com/v1"; // Replace with your actual API URL
   const [data, setData] = useState<
     { id: string; name: string; description: string; value: string }[]
   >([]);
@@ -56,15 +56,13 @@ const Page = () => {
       const result = await response.json();
       console.log("Success:", result);
 
-      // Update the local state to include the new task
       setData([...data, { ...newTask, id: result.id }]);
-      setNewTask({ name: "", description: "", value: "" }); // Reset form fields after submission
+      setNewTask({ name: "", description: "", value: "" });
     } catch (error) {
       console.error("Error posting data:", error);
     }
   };
 
-  // Handle deleting a task
   const handleDelete = async (id: string) => {
     try {
       const response = await fetch(`${url}/delete_function`, {
@@ -72,7 +70,7 @@ const Page = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ id }), // Send the task ID for deletion
+        body: JSON.stringify({ id }),
       });
 
       if (!response.ok) {
@@ -82,7 +80,6 @@ const Page = () => {
       const result = await response.json();
       console.log("Task deleted successfully:", result);
 
-      // Update the local state to remove the deleted task
       setData(data.filter((task) => task.id !== id));
     } catch (error) {
       console.error("Error deleting task:", error);
