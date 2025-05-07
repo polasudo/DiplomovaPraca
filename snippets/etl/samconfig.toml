@@ -1,0 +1,11 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "etl-skuska"
+resolve_s3 = true
+s3_prefix = "etl-skuska"
+region = "eu-central-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+parameter_overrides = "ProjectName=\"MySamEshopEtl\" GlueEtlScriptName=\"glue_etl_script.py\" DiscountRateForEtl=\"0.1\""
+image_repositories = []

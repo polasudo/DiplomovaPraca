@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM ETL Pipeline (Flat Structure) with Lambda Data Generator and Glue Job - FIXED HANDLER
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: myflatsametl
+    Description: A prefix for resource names.
+  GlueEtlScriptName:
+    Type: String
+    Default: glue_etl_script.py
+    Description: The name of the Glue ETL script file.
+  DiscountRateForEtl:
+    Type: Number
+    Default: 0.10
+    Description: Discount rate to be applied by the ETL job.
+
+Globals:
+  Function:
+    Timeout: 60
+    MemorySize: 256
+    Runtime: python3.13
+    Architectures:
+      - x86_64
+
+Resources:
+  GlueScriptsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::AccountId}-${AWS::Region}-${ProjectName}-glue-scripts"
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::AccountId}-${AWS::Region}-${ProjectName}-raw-data"
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration: { Rules: [{Id: AutoDeleteOldRawData, Status: Enabled, ExpirationInDays: 7}] }
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+
+  TransformedDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::AccountId}-${AWS::Region}-${ProjectName}-transformed-data"
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration: { Rules: [{Id: AutoDeleteOldTransformedData, Status: Enabled, ExpirationInDays: 30}] }
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+
+  DataGeneratorLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-DataGeneratorLambda"
+      CodeUri: .
+      Handler: data_generator_lambda.lambda_handler # FIXED: Assumes script is data_generator_lambda.py
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref RawDataBucket
+      Environment:
+        Variables:
+          SOURCE_S3_BUCKET: !Ref RawDataBucket
+      Events:
+        DataGenerationSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: "cron(0 2 * * ? *)"
+            Description: "Daily trigger for data generation"
+            Enabled: true # Consider setting to false for initial testing
+            RetryPolicy: { MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 2 }
+
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-GlueJobRole"
+      AssumeRolePolicyDocument: {Version: '2012-10-17', Statement: [{Effect: Allow, Principal: {Service: glue.amazonaws.com}, Action: sts:AssumeRole}]}
+      ManagedPolicyArns: ["arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"]
+      Policies:
+        - PolicyName: S3AccessForGlueEtl
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow # Allow Glue to read its own script(s) from GlueScriptsBucket
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${GlueScriptsBucket}/*" # Allow GetObject on any object in the bucket
+              - Effect: Allow # Allow Glue to GetObject from RawDataBucket
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${RawDataBucket}/*"
+              - Effect: Allow # Allow Glue to ListBucket on RawDataBucket
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${RawDataBucket}"
+              - Effect: Allow # Allow Glue to PutObject/DeleteObject in TransformedDataBucket
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "arn:aws:s3:::${TransformedDataBucket}/*"
+              - Effect: Allow # Allow Glue to ListBucket on TransformedDataBucket
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${TransformedDataBucket}"
+
+  ProductEtlJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub "${ProjectName}-ProductETLJob"
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://${GlueScriptsBucket}/${GlueEtlScriptName}"
+        PythonVersion: '3'
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-enable"
+        "--enable-metrics": ""
+        "--SOURCE_S3_PATH": !Sub "s3://${RawDataBucket}/product_data/"
+        "--TARGET_S3_PATH": !Sub "s3://${TransformedDataBucket}/transformed_product_data/"
+        "--DISCOUNT_RATE": !Ref DiscountRateForEtl
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      GlueVersion: '3.0'
+      MaxRetries: 0
+
+Outputs:
+  GlueScriptsS3BucketName:
+    Description: S3 Bucket for storing Glue ETL scripts. Upload your Glue script here.
+    Value: !Ref GlueScriptsBucket
+  RawDataS3BucketName:
+    Description: S3 Bucket where raw data will be uploaded by Lambda (ETL Source).
+    Value: !Ref RawDataBucket
+  TransformedDataS3BucketName:
+    Description: S3 Bucket where transformed data will be stored by Glue (ETL Target).
+    Value: !Ref TransformedDataBucket
+  DataGeneratorLambdaName:
+    Description: Name of the Data Generator Lambda function.
+    Value: !Ref DataGeneratorLambda
+  DataGeneratorLambdaArn:
+    Description: ARN of the Data Generator Lambda function.
+    Value: !GetAtt DataGeneratorLambda.Arn
+  GlueEtlJobName:
+    Description: Name of the AWS Glue ETL Job.
+    Value: !Ref ProductEtlJob
+
+    # sam deploy `
+    # --template-file .aws-sam/build/template.yaml `
+    # --stack-name "etl-skuska" `
+    # --region "eu-central-1" `
+    # --capabilities CAPABILITY_NAMED_IAM `
+    # --resolve-s3 `
+    # --parameter-overrides `
+    #     ParameterKey=ProjectName,ParameterValue="MySamEshopEtl" `
+    #     ParameterKey=GlueEtlScriptName,ParameterValue="glue_etl_script.py" `
+    #     ParameterKey=DiscountRateForEtl,ParameterValue="0.1" `
+    # --confirm-changeset `
+    # --disable-rollback
