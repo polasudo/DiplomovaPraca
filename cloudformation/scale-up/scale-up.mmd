@@ -1,0 +1,117 @@
+graph TD
+    %% --- Title ---
+    %% title: Scale-up E-Shop Serverless Runtime Architecture (AWS)
+
+    %% --- User Access & Frontend ---
+    subgraph User Access Layer
+        direction LR
+        Users(Users / Devices) --> Amplify(AWS Amplify Hosting - SPA + CDN)
+    end
+
+    %% --- API Layer & Edge Security ---
+    subgraph API Layer & Edge Security
+        direction TB
+        %% API Gateway introduced as mandatory entry point
+        APIGW(Amazon API Gateway - Managed Interface)
+        %% WAF/Shield typically used with API Gateway, assumed present
+        WAF(AWS WAF) --> Shield(AWS Shield) --> APIGW
+        %% Calls go through security layers first
+        Amplify -- API Calls --> WAF
+    end
+
+    %% --- Authentication & Authorization ---
+    subgraph Auth Layer
+         direction TB
+         Cognito(Amazon Cognito - User Mgmt, MFA, SSO Capable)
+         LambdaAuth(Lambda Authorizer - Custom Logic)
+
+         %% API Gateway integrates with Auth services
+         APIGW -- Authorize Request --> LambdaAuth
+         APIGW -- Authenticate User --> Cognito
+         LambdaAuth -- Validates Token From --> Cognito
+    end
+
+    %% --- Backend Compute Layer ---
+    subgraph Backend Compute
+        direction TB
+        %% IAM Roles are used but not explicitly shown in diagram components
+        LambdaFunctions(AWS Lambda - Backend Logic)
+        StepFunctions_Payment(AWS Step Functions - Payment Workflow)
+        Fargate_Batch(AWS Fargate - Long Batch Jobs > 15min)
+
+        %% API Gateway routes to backend compute
+        APIGW -- /api/* --> LambdaFunctions
+        APIGW -- /pay --> StepFunctions_Payment
+
+        %% Assume some trigger mechanism for Fargate (e.g., scheduled, event)
+        %% CloudWatch Events/EventBridge (not explicitly mentioned but typical) --> Fargate_Batch
+    end
+
+    %% --- Data Storage Layer ---
+    subgraph Data Storage Layer
+        direction TB
+        ElastiCache[(AWS ElastiCache Redis - Cache)]
+        DynamoDB[(Amazon DynamoDB - Primary Ops Data + GSIs)]
+        RDS_Analytics[(Amazon RDS PostgreSQL - Complex Analytics)]
+        S3_Media[(Amazon S3: Product Media)]
+        S3_Analytics[(Amazon S3: Analytics Data Lake)]
+
+        %% Data access patterns
+        LambdaFunctions -- Read/Write --> ElastiCache
+        ElastiCache -- Cache For --> DynamoDB
+        LambdaFunctions -- Read/Write --> DynamoDB 
+
+        %% Step Functions likely interacts with DynamoDB/RDS for state/data
+        StepFunctions_Payment --> DynamoDB
+        StepFunctions_Payment --> RDS_Analytics
+
+        %% Fargate interacts with data stores
+        Fargate_Batch -- Reads Data From --> S3_Analytics
+        Fargate_Batch -- Reads Data From --> RDS_Analytics
+        Fargate_Batch -- Writes Results To --> S3_Analytics 
+
+        %% Media access
+        Amplify -- Serves/Accesses Media From --> S3_Media
+        LambdaFunctions -- Media URLs/Metadata --> S3_Media
+    end
+
+    %% --- ETL & Analytics Layer ---
+    subgraph ETL & Analytics Layer
+        direction TB
+        Glue(AWS Glue - ETL Jobs)
+        Athena(Amazon Athena - Query S3)
+        QuickSight(Amazon QuickSight - BI Tool)
+
+        %% Glue ETL flows
+        DynamoDB -- Source --> Glue
+        S3_Analytics -- Source --> Glue
+        Glue -- Target --> RDS_Analytics
+        Glue -- Target --> S3_Analytics
+
+        %% Analytics Tooling
+        S3_Analytics -- Queried By --> Athena
+        RDS_Analytics -- Source For --> QuickSight
+        Athena -- Data Source For --> QuickSight
+    end
+
+    %% --- Monitoring & Operations ---
+    subgraph Monitoring & Operations
+        direction TB
+        CloudWatch(AWS CloudWatch: Logs, Metrics, Dashboards, Alarms)
+        CloudTrail(AWS CloudTrail: API Auditing)
+        XRay(AWS X-Ray: Distributed Tracing)
+        GuardDuty(AWS GuardDuty: Threat Detection)
+
+        %% Services feeding Monitoring Data
+        APIGW & LambdaFunctions & StepFunctions_Payment & Fargate_Batch --> CloudWatch & XRay
+        DynamoDB & RDS_Analytics & ElastiCache --> CloudWatch
+        GuardDuty -- Analyzes --> CloudTrail
+        GuardDuty & CloudWatch
+
+    end
+
+    %% --- Styling (Optional - Basic AWS Color) ---
+    classDef awsService fill:#FF9900,color:#fff,stroke:#333,stroke-width:1px;
+    %% Removed CFN from class list
+    class Amplify,APIGW,LambdaAuth,Cognito,LambdaFunctions,StepFunctions_Payment,Fargate_Batch,ElastiCache,DynamoDB,RDS_Analytics,S3_Media,S3_Analytics,Glue,Athena,QuickSight,CloudWatch,CloudTrail,XRay,GuardDuty,WAF,Shield awsService;
+    %% Removed devopsService classDef

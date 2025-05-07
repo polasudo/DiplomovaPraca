@@ -1,0 +1,181 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mocked payment Step Functions – create → hold → accept
+
+Parameters:
+  OrdersTableName:
+    Type: String
+    Default: MockOrders
+
+Resources:
+  ## DynamoDB Table
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref OrdersTableName
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  ## Lambda execution role (DynamoDB + Logs)
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: mock-stepf-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBFullAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt OrdersTable.Arn
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  ## Step Functions role (invoke Lambdas)
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: mock-stepf-sfn-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeMockLambdas
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt CreateOrderFunction.Arn
+                  - !GetAtt HoldPaymentFunction.Arn
+                  - !GetAtt AcceptPaymentFunction.Arn
+
+  ## Lambda #1: create order
+  CreateOrderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: mock-create-order
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTableName
+      Code:
+        ZipFile: |
+          import os, json, time, boto3
+          db = boto3.resource('dynamodb').Table(os.environ['ORDERS_TABLE'])
+          def handler(event, context):
+              order_id = event.get('orderId','order_'+str(int(time.time())))
+              db.put_item(Item={
+                  'orderId': order_id,
+                  'status':  'created',
+                  'createdAt': int(time.time())
+              })
+              return {'orderId': order_id}
+
+  ## Lambda #2: put payment on hold
+  HoldPaymentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: mock-hold-payment
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTableName
+      Code:
+        ZipFile: |
+          import os, json, boto3, time
+          db = boto3.resource('dynamodb').Table(os.environ['ORDERS_TABLE'])
+          def handler(event, context):
+              order_id = event['orderId']
+              db.update_item(
+                  Key={'orderId': order_id},
+                  UpdateExpression='SET #s = :h, holdAt = :t',
+                  ExpressionAttributeNames={'#s':'status'},
+                  ExpressionAttributeValues={':h':'hold',':t':int(time.time())}
+              )
+              return {'orderId': order_id, 'status':'hold'}
+
+  ## Lambda #3: accept payment
+  AcceptPaymentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: mock-accept-payment
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTableName
+      Code:
+        ZipFile: |
+          import os, json, boto3, time
+          db = boto3.resource('dynamodb').Table(os.environ['ORDERS_TABLE'])
+          def handler(event, context):
+              order_id = event['orderId']
+              db.update_item(
+                  Key={'orderId': order_id},
+                  UpdateExpression='SET #s = :p, paidAt = :t',
+                  ExpressionAttributeNames={'#s':'status'},
+                  ExpressionAttributeValues={':p':'paid', ':t':int(time.time())}
+              )
+              return {'orderId': order_id, 'status':'paid', 'message':'payment accepted'}
+
+  ## The Step Functions state machine
+  PaymentStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: mock-payment-workflow
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionString: !Sub |
+        {
+          "Comment": "Mocked payment flow: create → hold → accept",
+          "StartAt": "CreateOrder",
+          "States": {
+            "CreateOrder": {
+              "Type": "Task",
+              "Resource": "${CreateOrderFunction.Arn}",
+              "Next": "HoldPayment"
+            },
+            "HoldPayment": {
+              "Type": "Task",
+              "Resource": "${HoldPaymentFunction.Arn}",
+              "Next": "AcceptPayment"
+            },
+            "AcceptPayment": {
+              "Type": "Task",
+              "Resource": "${AcceptPaymentFunction.Arn}",
+              "End": true
+            }
+          }
+        }
