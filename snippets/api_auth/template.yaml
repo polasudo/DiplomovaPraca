@@ -20,8 +20,8 @@ Resources:
       UserPoolId: !Ref UserPool
       GenerateSecret: false
       ExplicitAuthFlows:
-        - ALLOW_USER_SRP_AUTH       # for SRP via initiate-auth
-        - ALLOW_USER_PASSWORD_AUTH  # for USER_PASSWORD_AUTH via initiate-auth
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH 
 
   # 3) IAM Role for Lambda execution
