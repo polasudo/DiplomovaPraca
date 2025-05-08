@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM application for scheduled uploads and S3-triggered transformations.
+
+Parameters:
+  SourceDataPrefix:
+    Type: String
+    Default: raw_data/
+    Description: Prefix for raw data in S3.
+  ProcessedDataPrefix:
+    Type: String
+    Default: processed_data/
+    Description: Prefix for transformed data in S3.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 60
+    MemorySize: 128
+
+Resources:
+
+  # S3 bucket to hold both raw and processed files
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls:    true
+        BlockPublicPolicy:  true
+        IgnorePublicAcls:   true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+  # Lambda that uploads sample data every morning at 09:00 UTC
+  DataUploaderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: uploader_lambda.lambda_handler
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref DataBucket
+          SOURCE_DATA_PREFIX: !Ref SourceDataPrefix
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref DataBucket
+      Events:
+        DailyUpload:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 9 * * ? *)
+            Name: DailyDataUpload
+            Description: Upload sample data each morning at 09:00 UTC
+            Enabled: true
+
+  # IAM Role for the transformer Lambda (needs GetObject & PutObject)
+  DataTransformerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3ReadWrite
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub 'arn:aws:s3:::${DataBucket}/*'
+
+  # Lambda that processes each new raw_data/ object
+  DataTransformerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: transform_lambda.lambda_handler
+      Role: !GetAtt DataTransformerFunctionRole.Arn
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref DataBucket
+          SOURCE_DATA_PREFIX: !Ref SourceDataPrefix
+          PROCESSED_DATA_PREFIX: !Ref ProcessedDataPrefix
+
+  # EventBridge rule to catch every S3 ObjectCreated under raw_data/
+  S3ObjectCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: OnObjectCreatedRawData
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - "Object Created"
+        resources:
+          - !GetAtt DataBucket.Arn
+        detail:
+          bucket:
+            name:
+              - !Ref DataBucket
+          object:
+            key:
+              - prefix: !Ref SourceDataPrefix
+      Targets:
+        - Arn: !GetAtt DataTransformerFunction.Arn
+          Id: InvokeTransformer
+
+  # Permission for EventBridge to invoke the transformer Lambda
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DataTransformerFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt S3ObjectCreatedRule.Arn
+
+Outputs:
+  BucketName:
+    Description: Name of the S3 bucket
+    Value: !Ref DataBucket
+  UploaderFunction:
+    Description: Name of the uploader Lambda
+    Value: !Ref DataUploaderFunction
+  TransformerFunction:
+    Description: Name of the transformer Lambda
+    Value: !Ref DataTransformerFunction
