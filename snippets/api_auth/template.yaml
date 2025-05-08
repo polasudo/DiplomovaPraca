@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  From-scratch HTTP API + Lambda integration with Cognito JWT authorizer
+
+Resources:
+
+  # 1) Cognito User Pool
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: crud-demo-pool
+      AutoVerifiedAttributes:
+        - email
+
+  # 2) Cognito App Client
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: crud-demo-client
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH       # for SRP via initiate-auth
+        - ALLOW_USER_PASSWORD_AUTH  # for USER_PASSWORD_AUTH via initiate-auth
+        - ALLOW_REFRESH_TOKEN_AUTH 
+
+  # 3) IAM Role for Lambda execution
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: crud-demo-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  # 4) The demo Lambda function
+  CrudFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: crud-handler
+      Runtime: python3.13
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'route': event['requestContext']['http']['method'] + ' ' +
+                               event['requestContext']['http']['path'],
+                      'message': 'Hello from Lambda!'
+                  })
+              }
+
+  # 5) HTTP API
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: crud-http-api
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [Authorization, Content-Type]
+        AllowOrigins: ['*']
+
+  # 6) Grant API Gateway permission to invoke the Lambda
+  ApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CrudFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+  # 7) Cognito JWT Authorizer
+  JwtAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref HttpApi
+      Name: CognitoJWTAuthorizer
+      AuthorizerType: JWT
+      IdentitySource:
+        - $request.header.Authorization
+      JwtConfiguration:
+        Audience:
+          - !Ref UserPoolClient
+        Issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+
+  # 8) Lambda integration (AWS_PROXY)
+  LambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt CrudFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  # 9) Routes — protect each with the Cognito authorizer
+  GetItemsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /items
+      Target: !Sub integrations/${LambdaIntegration}
+      AuthorizerId: !Ref JwtAuthorizer
+
+  PostItemsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /items
+      Target: !Sub integrations/${LambdaIntegration}
+      AuthorizerId: !Ref JwtAuthorizer
+
+  # 10) Auto-deploy default stage
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: '$default'
+      AutoDeploy: true
+
+Outputs:
+
+  ApiEndpoint:
+    Description: "Invoke URL for the HTTP API (no trailing slash)"
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  CognitoUserPoolId:
+    Description: "ID of the new Cognito User Pool"
+    Value: !Ref UserPool
+
+  CognitoUserPoolClientId:
+    Description: "ID of the Cognito App Client"
+    Value: !Ref UserPoolClient
