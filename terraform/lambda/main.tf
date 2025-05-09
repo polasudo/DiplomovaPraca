@@ -36,7 +36,7 @@ resource "aws_iam_policy" "lambda_dynamodb_policy" {
           "dynamodb:DeleteItem"
         ],
         Effect   = "Allow",
-        Resource = "arn:aws:dynamodb:eu-central-1:944769655596:table/example-table"
+        Resource = "arn:aws:dynamodb:eu-central-1:<number of account>:table/example-table"
       }
     ]
   })

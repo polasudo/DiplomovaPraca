@@ -57,10 +57,12 @@ Resources:
                     - ''
                     - - 'arn:aws:apigateway:'
                       - !Ref AWS::Region
-                      - ':lambda:path/2015-03-31/functions/'
-                      - !GetAtt ProdAlias.AliasArn
-                      - '/invocations'
-  
+                      - ':lambda:path/2015-03-31/functions/arn:aws:lambda:'
+                      - !Ref AWS::Region
+                      - ':'
+                      - !Ref AWS::AccountId
+                      - ':function:${stageVariables.lambdaFunction}:${stageVariables.lambdaAlias}/invocations'
+                    
   ### 2) Prod Lambda + Version + Alias ###
   ProdFunction:
     Type: AWS::Serverless::Function
@@ -80,7 +82,7 @@ Resources:
   ProdFunctionVersion:
     Type: AWS::Lambda::Version
     Properties:
-      FunctionName: !Ref ProdFunction
+      FunctionName: !Sub ProdFunction-${ApiVersion}
 
   ProdAlias:
     Type: AWS::Lambda::Alias
@@ -108,7 +110,7 @@ Resources:
   CanaryFunctionVersion:
     Type: AWS::Lambda::Version
     Properties:
-      FunctionName: !Ref CanaryFunction
+      FunctionName: !Sub CanaryFunction-${ApiVersion}
 
   CanaryAlias:
     Type: AWS::Lambda::Alias
