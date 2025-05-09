@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM template for API Gateway + Lambda (Python 3.13)
+  with canary deployment & versioned stage names,
+  using stage variables + aliases.
+
+Parameters:
+  ApiVersion:
+    Type: String
+    Default: v1
+    Description: API version (also used as the stage name)
+  CanaryPercent:
+    Type: Number
+    Default: 10
+    MinValue: 0
+    MaxValue: 100
+    Description: Percent of traffic for canary
+
+Resources:
+
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub MyApi-${ApiVersion}
+      StageName: !Ref ApiVersion
+      Variables:
+        # default all traffic → prod alias ARN
+        lambdaFunction: !Sub ProdFunction-${ApiVersion}
+        lambdaAlias: prod
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+      CanarySetting:
+        PercentTraffic: !Ref CanaryPercent
+        StageVariableOverrides:
+          # override canary slice → canary alias ARN
+          lambdaFunction: !Sub CanaryFunction-${ApiVersion}
+          lambdaAlias: canary
+        UseStageCache: false
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: !Sub MyApi-${ApiVersion}
+          version: '1.0'
+        paths:
+          /hello:
+            get:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                # build the URI so the literal ${stageVariables.lambdaFunctionArn} is left intact
+                uri:
+                  Fn::Join:
+                    - ''
+                    - - 'arn:aws:apigateway:'
+                      - !Ref AWS::Region
+                      - ':lambda:path/2015-03-31/functions/'
+                      - !GetAtt ProdAlias.AliasArn
+                      - '/invocations'
+  
+  ### 2) Prod Lambda + Version + Alias ###
+  ProdFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ProdFunction-${ApiVersion}
+      Runtime: python3.13
+      Handler: index.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      InlineCode: |
+        def handler(event, context):
+            return {
+                'statusCode': 200,
+                'body': 'Hello from Prod version!'
+            }
+
+  ProdFunctionVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref ProdFunction
+
+  ProdAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      Name: prod
+      FunctionName: !Ref ProdFunction
+      FunctionVersion: !GetAtt ProdFunctionVersion.Version
+
+  ### 3) Canary Lambda + Version + Alias ###
+  CanaryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub CanaryFunction-${ApiVersion}
+      Runtime: python3.13
+      Handler: index.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      InlineCode: |
+        def handler(event, context):
+            return {
+                'statusCode': 200,
+                'body': '👋 Hello from Canary deployment!'
+            }
+
+  CanaryFunctionVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref CanaryFunction
+
+  CanaryAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      Name: canary
+      FunctionName: !Ref CanaryFunction
+      FunctionVersion: !GetAtt CanaryFunctionVersion.Version
+
+  ### 4) Permissions so API GW can invoke *aliases* ###
+  LambdaPermissionProd:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ProdAlias.AliasArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/GET/hello
+
+  LambdaPermissionCanary:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt CanaryAlias.AliasArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/GET/hello
+
+Outputs:
+  EndpointUrl:
+    Description: Invoke URL for the hello endpoint
+    Value: !Sub |
+      https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${ApiVersion}/hello
