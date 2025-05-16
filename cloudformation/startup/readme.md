@@ -38,63 +38,62 @@ This documentation covers the **startup-phase** architecture and infrastructure-
 **Mermaid source** (`startup.mmd`): use a VS Code Mermaid extension to preview and edit.
 
 ```mermaid
-graph TD
-    %% --- Title ---
-    %% title: Startup E-Shop Serverless Architecture (Based on Provided Diagram)
+---
+config:
+  theme: base
+  fontSize: 30px
+  layout: fixed
+---
+flowchart TD
+ subgraph subGraph0["User Access Layer"]
+    direction LR
+        Amplify("AWS Amplify Hosting")
+        Users("Users / Devices")
+  end
+ subgraph subGraph1["Auth Layer"]
+    direction TB
+        Cognito("Amazon Cognito - User Mgmt")
+        LambdaAuth("Lambda: Custom Authorizer")
+  end
+ subgraph subGraph2["Backend Logic - AWS Lambda"]
+    direction TB
+        LambdaOrders("Lambda: Order Management CRUD")
+        LambdaSaleData("Lambda: Sale data processing")
+        LambdaPayment("Lambda: Payment Process")
+        DynamoDB[("Amazon DynamoDB")]
+  end
+ subgraph subGraph3["Data Storage & Analytics"]
+    direction TB
+        S3_Product[("S3: Product Bucket/Media")]
+        S3_Analytics[("S3: Analytics Bucket")]
+        Athena("Amazon Athena")
+        QuickSight("Amazon QuickSight")
+  end
+    Users --> Amplify
+    Amplify -- Handles Auth With --> Cognito
+    LambdaAuth -- Validates Identity Info From --> Cognito
+    Amplify -- Calls Function --> LambdaOrders
+    LambdaOrders -- protected by --> LambdaAuth
+    LambdaOrders --> LambdaSaleData
+    LambdaSaleData --> DynamoDB
+    LambdaPayment --> DynamoDB
+    Amplify -- Accesses/Serves --> S3_Product
+    DynamoDB -- Export --> S3_Analytics
+    S3_Analytics -- Queried By --> Athena
+    Athena -- Data Source For --> QuickSight
+     Amplify:::awsService
+     Cognito:::awsService
+     LambdaAuth:::awsService
+     LambdaOrders:::awsService
+     LambdaSaleData:::awsService
+     LambdaPayment:::awsService
+     DynamoDB:::awsService
+     S3_Product:::awsService
+     S3_Analytics:::awsService
+     Athena:::awsService
+     QuickSight:::awsService
+    classDef awsService fill:#FF9900,color:#fff,stroke:#333,stroke-width:1px
 
-    %% --- User Access & Frontend ---
-    subgraph User Access Layer
-        direction LR
-        Users(Users / Devices) --> Amplify(AWS Amplify Hosting)
-    end
-
-    %% --- Authentication & Authorization ---
-    subgraph Auth Layer
-         direction TB
-         Cognito(Amazon Cognito - User Mgmt)
-         LambdaAuth(Lambda: Custom Authorizer)
-
-         Amplify -- Handles Auth With --> Cognito
-         %% Diagram shows Cognito -> Authorizer. Interpreting as Authorizer uses/validates Cognito info.
-         %% Lambdas invoked via Amplify are protected by this Authorizer
-         LambdaAuth -- Validates Identity Info From --> Cognito
-    end
-
-    %% --- Backend Logic (Serverless Functions) ---
-    subgraph Backend Logic - AWS Lambda
-        direction TB
-        LambdaOrders(Lambda: Order Management CRUD)
-        LambdaSaleData(Lambda: Sale data processing)
-        LambdaPayment(Lambda: Payment Process)
-
-        %% Amplify invokes backend Lambda directly (managed by Amplify)
-        Amplify -- Calls Function --> LambdaOrders
-        %% Indicate that the invoked Lambda is protected by the Authorizer
-        LambdaOrders -- protected by --> LambdaAuth
-
-        %% Internal Lambda Flow shown in diagram
-        LambdaOrders --> LambdaSaleData
-        LambdaSaleData --> DynamoDB[(Amazon DynamoDB)]
-        LambdaPayment --> DynamoDB
-    end
-
-    %% --- Data Storage & Analytics Flow ---
-    subgraph Data Storage & Analytics
-        direction TB
-        S3_Product[(S3: Product Bucket/Media)]
-        S3_Analytics[(S3: Analytics Bucket)]
-        Athena(Amazon Athena)
-        QuickSight(Amazon QuickSight)
-
-        Amplify -- Accesses/Serves --> S3_Product
-        DynamoDB -- Export --> S3_Analytics
-        S3_Analytics -- Queried By --> Athena
-        Athena -- Data Source For --> QuickSight
-    end
-
-    %% --- Styling (Optional - Basic AWS Color) ---
-    classDef awsService fill:#FF9900,color:#fff,stroke:#333,stroke-width:1px;
-    class Amplify,Cognito,LambdaAuth,LambdaOrders,LambdaSaleData,LambdaPayment,DynamoDB,S3_Analytics,S3_Product,Athena,QuickSight awsService;
 ```
 
 Alternatively, view the pre-generated `Startup.png` for a static diagram.

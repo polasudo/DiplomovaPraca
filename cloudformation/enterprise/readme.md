@@ -64,139 +64,142 @@ This design meets enterprise requirements for isolation, threat detection, audit
 ```mermaid
 ---
 config:
-  layout: fixed
+ theme: base
+ fontSize: 20px
+ layout: fixed
 ---
 flowchart TD
- subgraph subGraph0["User Access Layer"]
-    direction LR
-        Amplify("Amplify + CloudFront")
-        Users("Users / Devices")
-  end
- subgraph subGraph1["API Layer & Edge Security"]
-    direction TB
-        WAF("AWS WAF")
-        Shield("AWS Shield")
-        APIGW("Amazon API Gateway")
-        Cognito("Amazon Cognito")
-  end
- subgraph subGraph2["Core Backend"]
-    direction TB
-        Lambda_OrderMgmt("Lambda: Order Management")
-        Lambda_CacheCheck("Lambda: Cache Check")
-        ElastiCache("Amazon ElastiCache Redis")
-        DynamoDB[("Amazon DynamoDB")]
-        EventBridge("Amazon EventBridge")
-  end
- subgraph subGraph3["Async & Workflow & Reporting"]
-    direction TB
-        Lambda_Notification("Lambda: Custom Notification")
-        StepFunctions("AWS Step Functions: Payment Workflow")
-        Lambda_PayReq("Lambda: Payment Request")
-        Lambda_PayRelease("Lambda: Payment Release")
-        Lambda_DataProc("Lambda: Safe Data Processing")
-        S3_DataLake[("Amazon S3: Data Lake")]
-        Fargate_Process("AWS Fargate: Process Tasks")
-        Fargate_LongRun("AWS Fargate: Long Running Tasks / Reports")
-        ThirdPartyServices("External 3rd Party Services")
-        S3_Reports[("Amazon S3: Reports Store")]
-  end
- subgraph subGraph4["Data Layer"]
-    direction TB
-        RDS[("Amazon RDS")]
-        S3_Assets[("Amazon S3: Static Assets / Other")]
-        Redshift[("Amazon Redshift")]
-  end
- subgraph subGraph5["Analytics & ETL"]
-    direction TB
-        Glue("AWS Glue ETL")
-        Athena("Amazon Athena")
-        QuickSight("Amazon QuickSight")
-  end
- subgraph subGraph6["AppSync API Layer"]
-    direction LR
-        AppSync("AWS AppSync GraphQL API")
-        ThirdPartyApps("3rd Party Apps / Clients")
-  end
- subgraph subGraph7["Monitoring & Security Ops"]
-    direction TB
-        CloudWatch("AWS CloudWatch: Logs, Metrics")
-        CloudTrail("AWS CloudTrail: API Logs")
-        XRay("AWS X-Ray: Tracing")
-        GuardDuty("Amazon GuardDuty: Threat Detection")
-        Inspector("Amazon Inspector: Vulnerability Scan")
-  end
-    Users --> Amplify
-    Amplify --> WAF
-    WAF --> Shield
-    Shield --> APIGW
-    APIGW -- Authenticates with --> Cognito
-    APIGW -- Route: /orders --> Lambda_OrderMgmt
-    APIGW -- Route: /cached --> Lambda_CacheCheck
-    Lambda_CacheCheck --> ElastiCache & CloudWatch & XRay
-    Lambda_OrderMgmt --> DynamoDB & EventBridge & CloudWatch & XRay
-    EventBridge -- Triggers --> Lambda_Notification & StepFunctions
-    StepFunctions --> Lambda_PayReq & Lambda_PayRelease & CloudWatch
-    Lambda_PayReq --> DynamoDB & CloudWatch & XRay
-    Lambda_PayRelease --> DynamoDB & CloudWatch & XRay
-    EventBridge --> Lambda_DataProc
-    Lambda_DataProc --> S3_DataLake & CloudWatch & XRay
-    S3_DataLake -- Report Data Source --> Fargate_LongRun
-    Fargate_LongRun -- Interacts With --> ThirdPartyServices
-    Fargate_LongRun -- Writes Report Results --> S3_Reports
-    Amplify -- Serves Assets From --> S3_Assets
-    S3_DataLake -- Source --> Glue
-    DynamoDB -- Source --> Glue
-    Glue -- Target --> Redshift & RDS & S3_DataLake
-    S3_DataLake -- Queried by --> Athena
-    Athena -- Data Source --> QuickSight
-    Redshift -- Data Source --> QuickSight
-    RDS -- Data Source --> QuickSight
-    ThirdPartyApps --> AppSync
-    AppSync -- Resolvers --> Lambda_OrderMgmt & DynamoDB
-    AppSync -- Reads Reports From --> S3_Reports
-    APIGW --> CloudWatch & XRay
-    Lambda_Notification --> CloudWatch & XRay
-    Fargate_Process --> CloudWatch
-    Fargate_LongRun --> CloudWatch
-    RDS --> CloudWatch
-    DynamoDB --> CloudWatch
-    Redshift --> CloudWatch
-    Inspector -- Scans --> Fargate_Process & Fargate_LongRun & Lambda_OrderMgmt
-    Inspector -- Findings --> CloudWatch
-    GuardDuty -- Analyzes --> CloudTrail
-    GuardDuty -- Findings --> CloudWatch
-     Amplify:::awsService
-     WAF:::awsService
-     Shield:::awsService
-     APIGW:::awsService
-     Cognito:::awsService
-     Lambda_OrderMgmt:::awsService
-     Lambda_CacheCheck:::awsService
-     ElastiCache:::awsService
-     DynamoDB:::awsService
-     EventBridge:::awsService
-     Lambda_Notification:::awsService
-     StepFunctions:::awsService
-     Lambda_PayReq:::awsService
-     Lambda_PayRelease:::awsService
-     Lambda_DataProc:::awsService
-     S3_DataLake:::awsService
-     Fargate_Process:::awsService
-     Fargate_LongRun:::awsService
-     S3_Reports:::awsService
-     RDS:::awsService
-     S3_Assets:::awsService
-     Redshift:::awsService
-     Glue:::awsService
-     Athena:::awsService
-     QuickSight:::awsService
-     AppSync:::awsService
-     CloudWatch:::awsService
-     CloudTrail:::awsService
-     XRay:::awsService
-     GuardDuty:::awsService
-     Inspector:::awsService
-    classDef awsService fill:#FF9900,color:#fff,stroke:#333,stroke-width:1px
+ subgraph subGraph0["User Access Layer"]
+    direction LR
+        Amplify("Amplify + CloudFront")
+        Users("Users / Devices")
+  end
+ subgraph subGraph1["API Layer & Edge Security"]
+    direction TB
+        WAF("AWS WAF")
+        Shield("AWS Shield")
+        APIGW("Amazon API Gateway")
+        Cognito("Amazon Cognito")
+  end
+ subgraph subGraph2["Core Backend"]
+    direction TB
+        Lambda_OrderMgmt("Lambda: Order Management")
+        Lambda_CacheCheck("Lambda: Cache Check")
+        ElastiCache("Amazon ElastiCache Redis")
+        DynamoDB[("Amazon DynamoDB")]
+        EventBridge("Amazon EventBridge")
+  end
+ subgraph subGraph3["Async & Workflow & Reporting"]
+    direction TB
+        Lambda_Notification("Lambda: Custom Notification")
+        StepFunctions("AWS Step Functions: Payment Workflow")
+        Lambda_PayReq("Lambda: Payment Request")
+        Lambda_PayRelease("Lambda: Payment Release")
+        Lambda_DataProc("Lambda: Safe Data Processing")
+        S3_DataLake[("Amazon S3: Data Lake")]
+        Fargate_Process("AWS Fargate: Process Tasks")
+        Fargate_LongRun("AWS Fargate: Long Running Tasks / Reports")
+        ThirdPartyServices("External 3rd Party Services")
+        S3_Reports[("Amazon S3: Reports Store")]
+  end
+ subgraph subGraph4["Data Layer"]
+    direction TB
+        RDS[("Amazon RDS")]
+        S3_Assets[("Amazon S3: Static Assets / Other")]
+        Redshift[("Amazon Redshift")]
+  end
+ subgraph subGraph5["Analytics & ETL"]
+    direction TB
+        Glue("AWS Glue ETL")
+        Athena("Amazon Athena")
+        QuickSight("Amazon QuickSight")
+  end
+ subgraph subGraph6["AppSync API Layer"]
+    direction LR
+        AppSync("AWS AppSync GraphQL API")
+        ThirdPartyApps("3rd Party Apps / Clients")
+  end
+ subgraph subGraph7["Monitoring & Security Ops"]
+    direction TB
+        CloudWatch("AWS CloudWatch: Logs, Metrics")
+        CloudTrail("AWS CloudTrail: API Logs")
+        XRay("AWS X-Ray: Tracing")
+        GuardDuty("Amazon GuardDuty: Threat Detection")
+        Inspector("Amazon Inspector: Vulnerability Scan")
+  end
+    Users --> Amplify
+    Amplify --> WAF
+    WAF --> Shield
+    Shield --> APIGW
+    APIGW -- Authenticates with --> Cognito
+    APIGW -- Route: /orders --> Lambda_OrderMgmt
+    APIGW -- Route: /cached --> Lambda_CacheCheck
+    Lambda_CacheCheck --> ElastiCache & CloudWatch & XRay
+    Lambda_OrderMgmt --> DynamoDB & EventBridge & CloudWatch & XRay
+    EventBridge -- Triggers --> Lambda_Notification & StepFunctions
+    StepFunctions --> Lambda_PayReq & Lambda_PayRelease & CloudWatch
+    Lambda_PayReq --> DynamoDB & CloudWatch & XRay
+    Lambda_PayRelease --> DynamoDB & CloudWatch & XRay
+    EventBridge --> Lambda_DataProc
+    Lambda_DataProc --> S3_DataLake & CloudWatch & XRay
+    S3_DataLake -- Report Data Source --> Fargate_LongRun
+    Fargate_LongRun -- Interacts With --> ThirdPartyServices
+    Fargate_LongRun -- Writes Report Results --> S3_Reports
+    Amplify -- Serves Assets From --> S3_Assets
+    S3_DataLake -- Source --> Glue
+    DynamoDB -- Source --> Glue
+    Glue -- Target --> Redshift & RDS & S3_DataLake
+    S3_DataLake -- Queried by --> Athena
+    Athena -- Data Source --> QuickSight
+    Redshift -- Data Source --> QuickSight
+    RDS -- Data Source --> QuickSight
+    ThirdPartyApps --> AppSync
+    AppSync -- Resolvers --> Lambda_OrderMgmt & DynamoDB
+    AppSync -- Reads Reports From --> S3_Reports
+    APIGW --> CloudWatch & XRay
+    Lambda_Notification --> CloudWatch & XRay
+    Fargate_Process --> CloudWatch
+    Fargate_LongRun --> CloudWatch
+    RDS --> CloudWatch
+    DynamoDB --> CloudWatch
+    Redshift --> CloudWatch
+    Inspector -- Scans --> Fargate_Process & Fargate_LongRun & Lambda_OrderMgmt
+    Inspector -- Findings --> CloudWatch
+    GuardDuty -- Analyzes --> CloudTrail
+    GuardDuty -- Findings --> CloudWatch
+     Amplify:::awsService
+     WAF:::awsService
+     Shield:::awsService
+     APIGW:::awsService
+     Cognito:::awsService
+     Lambda_OrderMgmt:::awsService
+     Lambda_CacheCheck:::awsService
+     ElastiCache:::awsService
+     DynamoDB:::awsService
+     EventBridge:::awsService
+     Lambda_Notification:::awsService
+     StepFunctions:::awsService
+     Lambda_PayReq:::awsService
+     Lambda_PayRelease:::awsService
+     Lambda_DataProc:::awsService
+     S3_DataLake:::awsService
+     Fargate_Process:::awsService
+     Fargate_LongRun:::awsService
+     S3_Reports:::awsService
+     RDS:::awsService
+     S3_Assets:::awsService
+     Redshift:::awsService
+     Glue:::awsService
+     Athena:::awsService
+     QuickSight:::awsService
+     AppSync:::awsService
+     CloudWatch:::awsService
+     CloudTrail:::awsService
+     XRay:::awsService
+     GuardDuty:::awsService
+     Inspector:::awsService
+    classDef awsService fill:#FF9900,color:#fff,stroke:#333,stroke-width:1px
+
 
 ```
 
