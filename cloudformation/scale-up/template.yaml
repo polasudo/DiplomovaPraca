@@ -12,6 +12,10 @@ Parameters:
   DbPasswordSecretName:
     Type: String
     Description: Name for the RDS database master password secret in Secrets Manager.
+  PowertoolsLayerArn:
+    Type: String
+    Description: ARN of the AWS Lambda Powertools Layer for Python
+    Default: !Sub "arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:21"
 
 Resources:
   ### VPC & Networking ###
@@ -558,29 +562,145 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt AuthLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          import uuid
+          import boto3
+          from botocore.exceptions import ClientError
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+          from aws_lambda_powertools.utilities.typing import LambdaContext
+          from aws_lambda_powertools.logging import correlation_paths
+          from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="register-user")
+          tracer = Tracer(service="register-user")
+          metrics = Metrics(namespace="MyApp", service="register-user")
 
-          def lambda_handler(event, context):
+          # Initialize DynamoDB client
+          dynamodb = boto3.resource('dynamodb')
+
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
+              # Create API Gateway event object for easier parsing
+              event_obj = APIGatewayProxyEvent(event)
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
-              # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
-
-              return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              
+              # Add business metrics
+              metrics.add_metric(name="RegistrationAttempt", unit="Count", value=1)
+              
+              # Get the DynamoDB table name from environment variables
+              customers_table_name = os.environ.get('CUSTOMERS_TABLE_NAME')
+              tracer.put_metadata(key="table_name", value=customers_table_name)
+              
+              # Get the table resource
+              table = dynamodb.Table(customers_table_name)
+              
+              try:
+                  # Parse the request body
+                  if event_obj.body:
+                      request_data = json.loads(event_obj.body)
+                  else:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": "Missing request body"})
+                      }
+                  
+                  # Validate required fields
+                  required_fields = ['email', 'firstName', 'lastName']
+                  missing_fields = [field for field in required_fields if field not in request_data]
+                  
+                  if missing_fields:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": f"Missing required fields: {', '.join(missing_fields)}"})
+                      }
+                  
+                  # Create a subsegment for database operations
+                  with tracer.capture_method("process_registration"):
+                      # Generate a unique user ID
+                      user_id = str(uuid.uuid4())
+                      
+                      # Prepare user data for DynamoDB
+                      user_item = {
+                          'userId': user_id,
+                          'email': request_data['email'],
+                          'firstName': request_data['firstName'],
+                          'lastName': request_data['lastName'],
+                          'createdAt': int(tracer.current_trace_id.split('-')[1]),  # Use trace ID timestamp as creation time
+                          'updatedAt': int(tracer.current_trace_id.split('-')[1])
+                      }
+                      
+                      # Add optional fields if present
+                      if 'phoneNumber' in request_data:
+                          user_item['phoneNumber'] = request_data['phoneNumber']
+                      
+                      # Write to DynamoDB
+                      table.put_item(Item=user_item)
+                      
+                      # Log success and add metrics
+                      logger.info("User registered successfully", extra={"userId": user_id})
+                      metrics.add_metric(name="SuccessfulRegistration", unit="Count", value=1)
+                      
+                      # Prepare success response
+                      response_body = {
+                          "message": "User registered successfully",
+                          "userId": user_id
+                      }
+              
+              except ClientError as e:
+                  # Handle DynamoDB errors
+                  error_code = e.response['Error']['Code']
+                  error_message = e.response['Error']['Message']
+                  
+                  logger.error("DynamoDB error", extra={
+                      "error_code": error_code,
+                      "error_message": error_message
                   })
+                  
+                  metrics.add_metric(name="DatabaseError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Database operation failed"})
+                  }
+              
+              except Exception as e:
+                  # Handle general errors
+                  logger.exception("Error processing registration")
+                  metrics.add_metric(name="ProcessingError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Internal server error"})
+                  }
+              
+              return {
+                  "statusCode": 201,  # Created
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps(response_body)
               }
       Environment:
         Variables:
@@ -605,29 +725,61 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt AuthLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+          from aws_lambda_powertools.utilities.typing import LambdaContext
+          from aws_lambda_powertools.logging import correlation_paths
+          from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="login-user")
+          tracer = Tracer(service="login-user")
+          metrics = Metrics(namespace="MyApp", service="login-user")
 
-          def lambda_handler(event, context):
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
+              # Create API Gateway event object for easier parsing
+              event_obj = APIGatewayProxyEvent(event)
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              
+              # Add business metrics
+              metrics.add_metric(name="LoginAttempt", unit="Count", value=1)
+              
               # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+              # user_pool_id = os.environ.get('COGNITO_USER_POOL_ID')
+              # tracer.put_metadata(key="user_pool_id", value=user_pool_id)
 
+              # Create a subsegment for additional tracing detail
+              with tracer.capture_method("process_login"):
+                  # Your business logic would go here
+                  response_body = {
+                      "message": f"Placeholder success from {function_name}",
+                      "received_event": event
+                  }
+              
               return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
-                  })
+                  "statusCode": 200,
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps(response_body)
               }
       Environment:
         Variables:
@@ -652,29 +804,170 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt OrderLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          import uuid
+          import time
+          import boto3
+          from botocore.exceptions import ClientError
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+          from aws_lambda_powertools.utilities.typing import LambdaContext
+          from aws_lambda_powertools.logging import correlation_paths
+          from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="create-order")
+          tracer = Tracer(service="create-order")
+          metrics = Metrics(namespace="MyApp", service="create-order")
 
-          def lambda_handler(event, context):
+          # Initialize DynamoDB client
+          dynamodb = boto3.resource('dynamodb')
+
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
+              # Create API Gateway event object for easier parsing
+              event_obj = APIGatewayProxyEvent(event)
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
-              # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
-
-              return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              
+              # Add business metrics
+              metrics.add_metric(name="OrderCreationAttempt", unit="Count", value=1)
+              
+              # Get the DynamoDB table name from environment variables
+              table_name = os.environ.get('TABLE_NAME')
+              tracer.put_metadata(key="table_name", value=table_name)
+              
+              # Get the table resource
+              table = dynamodb.Table(table_name)
+              
+              try:
+                  # Parse the request body
+                  if event_obj.body:
+                      request_data = json.loads(event_obj.body)
+                  else:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": "Missing request body"})
+                      }
+                  
+                  # Validate required fields
+                  required_fields = ['userId', 'items', 'shippingAddress']
+                  missing_fields = [field for field in required_fields if field not in request_data]
+                  
+                  if missing_fields:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": f"Missing required fields: {', '.join(missing_fields)}"})
+                      }
+                  
+                  # Validate items array
+                  if not isinstance(request_data['items'], list) or len(request_data['items']) == 0:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": "Items must be a non-empty array"})
+                      }
+                  
+                  # Create a subsegment for database operations
+                  with tracer.capture_method("process_order_creation"):
+                      # Generate a unique order ID
+                      order_id = str(uuid.uuid4())
+                      timestamp = int(time.time())
+                      
+                      # Calculate order total
+                      order_total = sum(item.get('price', 0) * item.get('quantity', 1) for item in request_data['items'])
+                      
+                      # Prepare order data for DynamoDB
+                      order_item = {
+                          'orderId': order_id,
+                          'userId': request_data['userId'],
+                          'items': request_data['items'],
+                          'shippingAddress': request_data['shippingAddress'],
+                          'orderTotal': order_total,
+                          'status': 'PENDING',
+                          'createdAt': timestamp,
+                          'updatedAt': timestamp
+                      }
+                      
+                      # Add optional fields if present
+                      if 'paymentMethod' in request_data:
+                          order_item['paymentMethod'] = request_data['paymentMethod']
+                      
+                      if 'notes' in request_data:
+                          order_item['notes'] = request_data['notes']
+                      
+                      # Write to DynamoDB
+                      table.put_item(Item=order_item)
+                      
+                      # Log success and add metrics
+                      logger.info("Order created successfully", extra={
+                          "orderId": order_id,
+                          "userId": request_data['userId'],
+                          "orderTotal": order_total
+                      })
+                      metrics.add_metric(name="SuccessfulOrderCreation", unit="Count", value=1)
+                      metrics.add_metric(name="OrderValue", unit="None", value=order_total)
+                      
+                      # Prepare success response
+                      response_body = {
+                          "message": "Order created successfully",
+                          "orderId": order_id,
+                          "status": "PENDING",
+                          "orderTotal": order_total
+                      }
+              
+              except ClientError as e:
+                  # Handle DynamoDB errors
+                  error_code = e.response['Error']['Code']
+                  error_message = e.response['Error']['Message']
+                  
+                  logger.error("DynamoDB error", extra={
+                      "error_code": error_code,
+                      "error_message": error_message
                   })
+                  
+                  metrics.add_metric(name="DatabaseError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Database operation failed"})
+                  }
+              
+              except Exception as e:
+                  # Handle general errors
+                  logger.exception("Error processing order creation")
+                  metrics.add_metric(name="ProcessingError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Internal server error"})
+                  }
+              
+              return {
+                  "statusCode": 201,  # Created
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps(response_body)
               }
       Environment:
         Variables:
@@ -700,29 +993,170 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt OrderLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          import boto3
+          from botocore.exceptions import ClientError
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+          from aws_lambda_powertools.utilities.typing import LambdaContext
+          from aws_lambda_powertools.logging import correlation_paths
+          from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="get-orders")
+          tracer = Tracer(service="get-orders")
+          metrics = Metrics(namespace="MyApp", service="get-orders")
 
-          def lambda_handler(event, context):
+          # Initialize DynamoDB client
+          dynamodb = boto3.resource('dynamodb')
+
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
+              # Create API Gateway event object for easier parsing
+              event_obj = APIGatewayProxyEvent(event)
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
-              # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
-
-              return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              
+              # Add business metrics
+              metrics.add_metric(name="OrdersListRequest", unit="Count", value=1)
+              
+              # Get the DynamoDB table name and index from environment variables
+              table_name = os.environ.get('TABLE_NAME')
+              index_name = os.environ.get('INDEX_NAME')
+              tracer.put_metadata(key="table_name", value=table_name)
+              tracer.put_metadata(key="index_name", value=index_name)
+              
+              # Get the table resource
+              table = dynamodb.Table(table_name)
+              
+              try:
+                  # Get userId from path parameters
+                  path_parameters = event_obj.path_parameters or {}
+                  user_id = path_parameters.get('userId')
+                  
+                  # If userId is not in path parameters, try to get it from query parameters
+                  if not user_id and event_obj.query_string_parameters:
+                      user_id = event_obj.query_string_parameters.get('userId')
+                  
+                  # Validate userId is provided
+                  if not user_id:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": "Missing required parameter: userId"})
+                      }
+                  
+                  # Get pagination parameters if provided
+                  query_params = event_obj.query_string_parameters or {}
+                  limit = int(query_params.get('limit', 20))  # Default to 20 items
+                  last_evaluated_key = None
+                  
+                  # If nextToken is provided, decode it for pagination
+                  if 'nextToken' in query_params:
+                      import base64
+                      try:
+                          last_evaluated_key_json = base64.b64decode(query_params['nextToken']).decode('utf-8')
+                          last_evaluated_key = json.loads(last_evaluated_key_json)
+                      except Exception as e:
+                          logger.warning("Invalid nextToken", extra={"error": str(e)})
+                  
+                  # Create a subsegment for database operations
+                  with tracer.capture_method("process_get_orders"):
+                      # Query parameters for DynamoDB
+                      query_params = {
+                          'IndexName': index_name,
+                          'KeyConditionExpression': 'userId = :userId',
+                          'ExpressionAttributeValues': {
+                              ':userId': user_id
+                          },
+                          'Limit': limit,
+                          'ScanIndexForward': False  # Sort by most recent first
+                      }
+                      
+                      # Add ExclusiveStartKey for pagination if we have a last evaluated key
+                      if last_evaluated_key:
+                          query_params['ExclusiveStartKey'] = last_evaluated_key
+                      
+                      # Query DynamoDB
+                      response = table.query(**query_params)
+                      
+                      # Prepare items for response
+                      items = response.get('Items', [])
+                      
+                      # Prepare pagination token if there are more results
+                      next_token = None
+                      if 'LastEvaluatedKey' in response:
+                          import base64
+                          last_key_json = json.dumps(response['LastEvaluatedKey'])
+                          next_token = base64.b64encode(last_key_json.encode('utf-8')).decode('utf-8')
+                      
+                      # Log success and add metrics
+                      logger.info("Orders retrieved successfully", extra={
+                          "userId": user_id,
+                          "count": len(items)
+                      })
+                      metrics.add_metric(name="OrdersRetrieved", unit="Count", value=len(items))
+                      
+                      # Prepare success response
+                      response_body = {
+                          "orders": items,
+                          "count": len(items)
+                      }
+                      
+                      # Add pagination token if available
+                      if next_token:
+                          response_body["nextToken"] = next_token
+              
+              except ClientError as e:
+                  # Handle DynamoDB errors
+                  error_code = e.response['Error']['Code']
+                  error_message = e.response['Error']['Message']
+                  
+                  logger.error("DynamoDB error", extra={
+                      "error_code": error_code,
+                      "error_message": error_message
                   })
+                  
+                  metrics.add_metric(name="DatabaseError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Database operation failed"})
+                  }
+              
+              except Exception as e:
+                  # Handle general errors
+                  logger.exception("Error retrieving orders")
+                  metrics.add_metric(name="ProcessingError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Internal server error"})
+                  }
+              
+              return {
+                  "statusCode": 200,
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps(response_body)
               }
       Environment:
         Variables:
@@ -749,29 +1183,144 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt OrderLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          import boto3
+          from botocore.exceptions import ClientError
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+          from aws_lambda_powertools.utilities.typing import LambdaContext
+          from aws_lambda_powertools.logging import correlation_paths
+          from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="get-order-details")
+          tracer = Tracer(service="get-order-details")
+          metrics = Metrics(namespace="MyApp", service="get-order-details")
 
-          def lambda_handler(event, context):
+          # Initialize DynamoDB client
+          dynamodb = boto3.resource('dynamodb')
+
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
+              # Create API Gateway event object for easier parsing
+              event_obj = APIGatewayProxyEvent(event)
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
-              # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
-
-              return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              
+              # Add business metrics
+              metrics.add_metric(name="OrderDetailsRequest", unit="Count", value=1)
+              
+              # Get the DynamoDB table name from environment variables
+              table_name = os.environ.get('TABLE_NAME')
+              tracer.put_metadata(key="table_name", value=table_name)
+              
+              # Get the table resource
+              table = dynamodb.Table(table_name)
+              
+              try:
+                  # Get orderId from path parameters
+                  path_parameters = event_obj.path_parameters or {}
+                  order_id = path_parameters.get('orderId')
+                  
+                  # If orderId is not in path parameters, try to get it from query parameters
+                  if not order_id and event_obj.query_string_parameters:
+                      order_id = event_obj.query_string_parameters.get('orderId')
+                  
+                  # Validate orderId is provided
+                  if not order_id:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": "Missing required parameter: orderId"})
+                      }
+                  
+                  # Create a subsegment for database operations
+                  with tracer.capture_method("process_get_order_details"):
+                      # Get item from DynamoDB
+                      response = table.get_item(
+                          Key={
+                              'orderId': order_id
+                          }
+                      )
+                      
+                      # Check if the item exists
+                      if 'Item' not in response:
+                          logger.warning("Order not found", extra={"orderId": order_id})
+                          return {
+                              "statusCode": 404,
+                              "headers": {"Content-Type": "application/json"},
+                              "body": json.dumps({"error": "Order not found"})
+                          }
+                      
+                      # Get the order item
+                      order = response['Item']
+                      
+                      # Check if the user has permission to access this order
+                      # This would typically involve checking the authenticated user's ID
+                      # against the userId in the order, but for this example we'll skip that
+                      
+                      # Log success and add metrics
+                      logger.info("Order details retrieved successfully", extra={
+                          "orderId": order_id,
+                          "userId": order.get('userId')
+                      })
+                      metrics.add_metric(name="OrderDetailsRetrieved", unit="Count", value=1)
+                      
+                      # Prepare success response
+                      response_body = {
+                          "order": order
+                      }
+              
+              except ClientError as e:
+                  # Handle DynamoDB errors
+                  error_code = e.response['Error']['Code']
+                  error_message = e.response['Error']['Message']
+                  
+                  logger.error("DynamoDB error", extra={
+                      "error_code": error_code,
+                      "error_message": error_message
                   })
+                  
+                  metrics.add_metric(name="DatabaseError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Database operation failed"})
+                  }
+              
+              except Exception as e:
+                  # Handle general errors
+                  logger.exception("Error retrieving order details")
+                  metrics.add_metric(name="ProcessingError", unit="Count", value=1)
+                  
+                  return {
+                      "statusCode": 500,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "Internal server error"})
+                  }
+              
+              return {
+                  "statusCode": 200,
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps(response_body)
               }
       Environment:
         Variables:
@@ -797,29 +1346,61 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt FeedbackLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+          from aws_lambda_powertools.utilities.typing import LambdaContext
+          from aws_lambda_powertools.logging import correlation_paths
+          from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="submit-feedback")
+          tracer = Tracer(service="submit-feedback")
+          metrics = Metrics(namespace="MyApp", service="submit-feedback")
 
-          def lambda_handler(event, context):
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
+              # Create API Gateway event object for easier parsing
+              event_obj = APIGatewayProxyEvent(event)
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              
+              # Add business metrics
+              metrics.add_metric(name="FeedbackSubmission", unit="Count", value=1)
+              
               # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+              # table_name = os.environ.get('TABLE_NAME')
+              # tracer.put_metadata(key="table_name", value=table_name)
 
+              # Create a subsegment for additional tracing detail
+              with tracer.capture_method("process_feedback"):
+                  # Your business logic would go here
+                  response_body = {
+                      "message": f"Placeholder success from {function_name}",
+                      "received_event": event
+                  }
+              
               return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
-                  })
+                  "statusCode": 200,
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps(response_body)
               }
       Environment:
         Variables:
@@ -843,29 +1424,61 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt AnalyticsLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+          from aws_lambda_powertools.utilities.typing import LambdaContext
+          from aws_lambda_powertools.logging import correlation_paths
+          from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="get-analytics")
+          tracer = Tracer(service="get-analytics")
+          metrics = Metrics(namespace="MyApp", service="get-analytics")
 
-          def lambda_handler(event, context):
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
+              # Create API Gateway event object for easier parsing
+              event_obj = APIGatewayProxyEvent(event)
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              
+              # Add business metrics
+              metrics.add_metric(name="AnalyticsRequest", unit="Count", value=1)
+              
               # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
+              # orders_table = os.environ.get('ORDERS_TABLE')
+              # tracer.put_metadata(key="orders_table", value=orders_table)
 
+              # Create a subsegment for additional tracing detail
+              with tracer.capture_method("process_analytics"):
+                  # Your business logic would go here
+                  response_body = {
+                      "message": f"Placeholder success from {function_name}",
+                      "received_event": event
+                  }
+              
               return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
-                  })
+                  "statusCode": 200,
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps(response_body)
               }
       Environment:
         Variables:
@@ -894,30 +1507,49 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.11
       Role: !GetAtt PaymentStepLambdaRole.Arn
+      Layers:
+        - !Ref PowertoolsLayerArn
       Code:
         ZipFile: |
           import json
           import os
-          import logging
+          from aws_lambda_powertools import Logger, Tracer, Metrics
+          from aws_lambda_powertools.utilities.typing import LambdaContext
 
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          # Initialize PowerTools
+          logger = Logger(service="payment-step")
+          tracer = Tracer(service="payment-step")
+          metrics = Metrics(namespace="MyApp", service="payment-step")
 
-          def lambda_handler(event, context):
+          @logger.inject_lambda_context
+          @tracer.capture_lambda_handler
+          @metrics.log_metrics(capture_cold_start_metric=True)
+          def lambda_handler(event, context: LambdaContext):
               function_name = context.function_name
-              logger.info(f"Placeholder function '{function_name}' invoked.")
-              logger.info("Received event: " + json.dumps(event, indent=2))
-
-              # Example accessing env vars (uncomment if needed)
-              # customers_table = os.environ.get('CUSTOMERS_TABLE_NAME')
-
-              return {
-                  'statusCode': 200,
-                  'body': json.dumps({
-                      'message': f'Placeholder success from {function_name}',
-                      'received_event': event
-                  })
-              }
+              
+              # Log structured information
+              logger.info("Function invoked", extra={
+                  "function_name": function_name,
+                  "request_id": context.aws_request_id
+              })
+              
+              # Add custom annotation for X-Ray
+              tracer.put_annotation(key="function_name", value=function_name)
+              tracer.put_annotation(key="step_function_execution", value="true")
+              
+              # Add business metrics
+              metrics.add_metric(name="PaymentStepExecution", unit="Count", value=1)
+              
+              # Create a subsegment for additional tracing detail
+              with tracer.capture_method("process_payment_step"):
+                  # Your business logic would go here
+                  # Note: Step Functions expect a different response format than API Gateway
+                  response = {
+                      "message": f"Placeholder success from {function_name}",
+                      "received_event": event
+                  }
+              
+              return response
       Environment:
         Variables:
           EXAMPLE_VAR: "PaymentStepValue"
