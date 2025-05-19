@@ -15,7 +15,7 @@ Parameters:
   PowertoolsLayerArn:
     Type: String
     Description: ARN of the AWS Lambda Powertools Layer for Python
-    Default: !Sub "arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2:21"
+    Default: "arn:aws:lambda:eu-central-1:017000801446:layer:AWSLambdaPowertoolsPythonV3-python39-x86_64:14"
 
 Resources:
   ### VPC & Networking ###
@@ -193,7 +193,9 @@ Resources:
       UserPoolId: !Ref UserPool
       GenerateSecret: false
       ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH # Add this line
         - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
       PreventUserExistenceErrors: ENABLED
 
@@ -318,6 +320,7 @@ Resources:
                   - cognito-idp:AdminRespondToAuthChallenge
                   - cognito-idp:SignUp
                   - cognito-idp:ConfirmSignUp
+                  - cognito-idp:AdminConfirmSignUp
                 Resource: !GetAtt UserPool.Arn
               - Effect: Allow
                 Action:
@@ -578,161 +581,157 @@ Resources:
       Role: !GetAtt AuthLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: "INFO"
+          POWERTOOLS_SERVICE_NAME: "register-user"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          CUSTOMERS_TABLE_NAME: !Ref CustomersTable
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID:    !Ref UserPoolClient
+          CUSTOMERS_TABLE_NAME: !Ref CustomersTable
       Code:
         ZipFile: |
           import json
           import os
-          import uuid
           import boto3
-          import datetime
+          from decimal import Decimal
           from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
-          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
-          from aws_lambda_powertools.utilities.typing import LambdaContext
           from aws_lambda_powertools.logging import correlation_paths
           from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
+          from aws_lambda_powertools.utilities.typing import LambdaContext
 
-          # Initialize PowerTools
+          # Powertools initialization
           logger = Logger(service="register-user")
           tracer = Tracer(service="register-user")
           metrics = Metrics(namespace="MyApp", service="register-user")
 
-          # Initialize DynamoDB client
-          dynamodb = boto3.resource('dynamodb')
+          cognito = boto3.client("cognito-idp")
+          dynamodb = boto3.resource("dynamodb")
+
+          USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID")
+          CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID")
+          CUSTOMERS_TABLE_NAME = os.environ.get("CUSTOMERS_TABLE_NAME")
+
+          table = None
+          if CUSTOMERS_TABLE_NAME:
+              table = dynamodb.Table(CUSTOMERS_TABLE_NAME)
+
+          def _json_response(status_code, body):
+              return {
+                  "statusCode": status_code,
+                  "headers": {
+                      "Content-Type": "application/json",
+                      "Access-Control-Allow-Origin": "*"
+                  },
+                  "body": json.dumps(body),
+              }
 
           @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
           @tracer.capture_lambda_handler
           @metrics.log_metrics(capture_cold_start_metric=True)
           def lambda_handler(event, context: LambdaContext):
-              # Create API Gateway event object for easier parsing
               event_obj = APIGatewayProxyEvent(event)
-              function_name = context.function_name
-              
-              # Log structured information
-              logger.info("Function invoked", extra={
-                  "function_name": function_name,
-                  "request_id": context.aws_request_id
-              })
-              
-              # Add custom annotation for X-Ray
-              tracer.put_annotation(key="function_name", value=function_name)
-              
-              # Add business metrics
-              metrics.add_metric(name="RegistrationAttempt", unit="Count", value=1)
-              
-              # Get the DynamoDB table name from environment variables
-              table_name = os.environ.get('CUSTOMERS_TABLE_NAME')
-              tracer.put_metadata(key="table_name", value=table_name)
-              
-              # Get the table resource
-              table = dynamodb.Table(table_name)
-              
+              logger.info("RegisterUser lambda triggered")
+
+              # Parse and validate request
               try:
-                  # Parse request body
-                  if not event_obj.body:
-                      return {
-                          "statusCode": 400,
-                          "headers": {"Content-Type": "application/json"},
-                          "body": json.dumps({"error": "Missing request body"})
-                      }
-                  
-                  body = json.loads(event_obj.body)
-                  
-                  # Validate required fields
-                  required_fields = ['email', 'password', 'name']
-                  for field in required_fields:
-                      if field not in body:
-                          return {
-                              "statusCode": 400,
-                              "headers": {"Content-Type": "application/json"},
-                              "body": json.dumps({"error": f"Missing required field: {field}"})
-                          }
-                  
-                  # Create a subsegment for user registration process
-                  with tracer.capture_method("process_registration"):
-                      # Generate a unique user ID
-                      user_id = str(uuid.uuid4())
-                      
-                      # Create user item for DynamoDB
-                      user_item = {
-                          'userId': user_id,
-                          'email': body['email'],
-                          'name': body['name'],
-                          'createdAt': str(int(datetime.datetime.now().timestamp())),
-                          'status': 'ACTIVE'
-                      }
-                      
-                      # Add optional fields if provided
-                      if 'phone' in body:
-                          user_item['phone'] = body['phone']
-                      
-                      # Put item in DynamoDB
-                      table.put_item(Item=user_item)
-                      
-                      # Log success and add metrics
-                      logger.info("User registered successfully", extra={
-                          "userId": user_id,
-                          "email": body['email']
-                      })
-                      metrics.add_metric(name="UserRegistered", unit="Count", value=1)
-                      
-                      # Prepare success response
-                      response_body = {
-                          "userId": user_id,
-                          "message": "User registered successfully"
-                      }
-              
+                  data = json.loads(event_obj.body or "{}")
+              except Exception:
+                  return _json_response(400, {"error": "Invalid JSON in request body"})
+
+              required = ["email", "password", "firstName", "lastName"]
+              missing = [f for f in required if not data.get(f)]
+              if missing:
+                  return _json_response(400, {"error": f"Missing required fields: {', '.join(missing)}"})
+
+              email = data["email"]
+              password = data["password"]
+              first_name = data["firstName"]
+              last_name = data["lastName"]
+              phone = data.get("phoneNumber")
+
+              # Call Cognito sign_up
+              try:
+                  cognito_kwargs = {
+                      "ClientId": CLIENT_ID,
+                      "Username": email,
+                      "Password": password,
+                      "UserAttributes": [
+                          {"Name": "email", "Value": email},
+                          {"Name": "name", "Value": first_name},
+                          {"Name": "family_name", "Value": last_name},
+                      ]
+                  }
+                  if phone:
+                      cognito_kwargs["UserAttributes"].append({"Name": "phone_number", "Value": phone})
+                  logger.info("Calling Cognito sign_up", extra={"username": email})
+                  resp = cognito.sign_up(**cognito_kwargs)
+                  user_sub = resp["UserSub"]
+                  logger.info("Cognito sign_up success", extra={"userSub": user_sub})
+
+                  try:
+                    logger.info(f"Attempting to auto-confirm user {email}")
+                    cognito.admin_confirm_sign_up(UserPoolId=USER_POOL_ID, Username=email)
+                    logger.info(f"Auto-confirmation successful for user {email}")
+                  except Exception as e:
+                    logger.error(f"Failed to auto-confirm user {email} via admin_confirm_sign_up.", 
+                         extra={"error": str(e_confirm), "username": email})
+                  metrics.add_metric(name="SuccessfulRegistration", unit="Count", value=1)
+
+              except cognito.exceptions.UsernameExistsException:
+                  logger.warning("User already exists", extra={"username": email})
+                  metrics.add_metric(name="RegistrationConflict", unit="Count", value=1)
+                  return _json_response(409, {"error": "User already exists"})
+
               except ClientError as e:
-                  # Handle DynamoDB errors
-                  error_code = e.response['Error']['Code']
-                  error_message = e.response['Error']['Message']
-                  
-                  logger.error("DynamoDB error", extra={
-                      "error_code": error_code,
-                      "error_message": error_message
-                  })
-                  
-                  metrics.add_metric(name="DatabaseError", unit="Count", value=1)
-                  
-                  return {
-                      "statusCode": 500,
-                      "headers": {"Content-Type": "application/json"},
-                      "body": json.dumps({"error": "Database operation failed"})
-                  }
-              
+                  logger.exception("Cognito ClientError during registration")
+                  metrics.add_metric(name="RegistrationFailed", unit="Count", value=1)
+                  return _json_response(500, {"error": e.response["Error"]["Message"]})
+
               except Exception as e:
-                  # Handle general errors
-                  logger.exception("Error registering user")
-                  metrics.add_metric(name="ProcessingError", unit="Count", value=1)
-                  
-                  return {
-                      "statusCode": 500,
-                      "headers": {"Content-Type": "application/json"},
-                      "body": json.dumps({"error": "Internal server error"})
-                  }
-              
-              return {
-                  "statusCode": 201,
-                  "headers": {
-                      "Content-Type": "application/json"
-                  },
-                  "body": json.dumps(response_body)
-              }
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref UserPool
-          COGNITO_CLIENT_ID:    !Ref UserPoolClient
-          CUSTOMERS_TABLE_NAME: !Ref CustomersTable
+                  logger.exception("Unknown error during Cognito registration")
+                  metrics.add_metric(name="RegistrationFailed", unit="Count", value=1)
+                  return _json_response(500, {"error": "Internal server error"})
+
+              # Store user to DynamoDB (optional, if table is set)
+              if table:
+                  import time
+                  try:
+                      item = {
+                          "userId": user_sub,
+                          "email": email,
+                          "firstName": first_name,
+                          "lastName": last_name,
+                          "createdAt": Decimal(int(time.time())),
+                          "updatedAt": Decimal(int(time.time()))
+                      }
+                      if phone:
+                          item["phoneNumber"] = phone
+                      table.put_item(Item=item)
+                      logger.info("User record inserted in DynamoDB", extra={"userId": user_sub})
+                  except Exception as e:
+                      logger.exception("Failed to insert user in DynamoDB")
+                      # Still return 201 because Cognito registration succeeded
+                      return _json_response(201, {
+                          "message": "User registered successfully (but not stored in Customers table)",
+                          "userSub": user_sub,
+                          "warning": "DynamoDB operation failed"
+                      })
+
+              # Return success response
+              return _json_response(201, {
+                  "message": "User registered successfully",
+                  "userSub": user_sub
+              })
       Timeout: 15
       MemorySize: 128
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
   LoginUserFunction:
     Type: AWS::Lambda::Function
@@ -743,74 +742,116 @@ Resources:
       Role: !GetAtt AuthLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: "INFO"
+          POWERTOOLS_SERVICE_NAME: "login-user"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_CLIENT_ID: !Ref UserPoolClient
       Code:
         ZipFile: |
           import json
           import os
+          import boto3
+          from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
-          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
-          from aws_lambda_powertools.utilities.typing import LambdaContext
           from aws_lambda_powertools.logging import correlation_paths
           from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
+          from aws_lambda_powertools.utilities.typing import LambdaContext
 
-          # Initialize PowerTools
+          # Powertools initialization
           logger = Logger(service="login-user")
           tracer = Tracer(service="login-user")
           metrics = Metrics(namespace="MyApp", service="login-user")
+
+          cognito = boto3.client("cognito-idp")
+
+          USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID")
+          CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID")
+
+          def _json_response(status_code, body):
+              return {
+                  "statusCode": status_code,
+                  "headers": {
+                      "Content-Type": "application/json",
+                      "Access-Control-Allow-Origin": "*"
+                  },
+                  "body": json.dumps(body),
+              }
 
           @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
           @tracer.capture_lambda_handler
           @metrics.log_metrics(capture_cold_start_metric=True)
           def lambda_handler(event, context: LambdaContext):
-              # Create API Gateway event object for easier parsing
               event_obj = APIGatewayProxyEvent(event)
-              function_name = context.function_name
-              
-              # Log structured information
-              logger.info("Function invoked", extra={
-                  "function_name": function_name,
-                  "request_id": context.aws_request_id
-              })
-              
-              # Add custom annotation for X-Ray
-              tracer.put_annotation(key="function_name", value=function_name)
-              
-              # Add business metrics
-              metrics.add_metric(name="LoginAttempt", unit="Count", value=1)
-              
-              # Example accessing env vars (uncomment if needed)
-              # user_pool_id = os.environ.get('COGNITO_USER_POOL_ID')
-              # tracer.put_metadata(key="user_pool_id", value=user_pool_id)
+              logger.info("LoginUser lambda triggered")
 
-              # Create a subsegment for additional tracing detail
-              with tracer.capture_method("process_login"):
-                  # Your authentication logic would go here
-                  response_body = {
-                      "message": f"Placeholder success from {function_name}",
-                      "received_event": event
-                  }
-              
-              return {
-                  "statusCode": 200,
-                  "headers": {
-                      "Content-Type": "application/json"
-                  },
-                  "body": json.dumps(response_body)
-              }
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref UserPool
-          COGNITO_CLIENT_ID:    !Ref UserPoolClient
+              # Parse and validate request
+              try:
+                  data = json.loads(event_obj.body or "{}")
+              except Exception:
+                  return _json_response(400, {"error": "Invalid JSON in request body"})
+
+              email = data.get("email")
+              password = data.get("password")
+              if not email or not password:
+                  return _json_response(400, {"error": "Missing required fields: email, password"})
+
+              try:
+                  # Use AdminInitiateAuth for backend
+                  resp = cognito.admin_initiate_auth(
+                      UserPoolId=USER_POOL_ID,
+                      ClientId=CLIENT_ID,
+                      AuthFlow="ADMIN_USER_PASSWORD_AUTH",
+                      AuthParameters={
+                          "USERNAME": email,
+                          "PASSWORD": password
+                      }
+                  )
+                  logger.info("Cognito admin_initiate_auth success", extra={"username": email})
+                  metrics.add_metric(name="LoginSuccess", unit="Count", value=1)
+
+                  tokens = resp.get("AuthenticationResult", {})
+                  return _json_response(200, {
+                      "message": "Login successful",
+                      "idToken": tokens.get("IdToken"),
+                      "accessToken": tokens.get("AccessToken"),
+                      "refreshToken": tokens.get("RefreshToken"),
+                      "expiresIn": tokens.get("ExpiresIn")
+                  })
+
+              except cognito.exceptions.NotAuthorizedException:
+                  logger.warning("Invalid login attempt", extra={"username": email})
+                  metrics.add_metric(name="LoginFailed", unit="Count", value=1)
+                  return _json_response(401, {"error": "Invalid username or password"})
+
+              except cognito.exceptions.UserNotFoundException:
+                  logger.warning("User not found", extra={"username": email})
+                  metrics.add_metric(name="LoginFailed", unit="Count", value=1)
+                  return _json_response(401, {"error": "Invalid username or password"})
+
+              except cognito.exceptions.UserNotConfirmedException:
+                  logger.info("User not confirmed", extra={"username": email})
+                  return _json_response(403, {"error": "User account not confirmed"})
+
+              except ClientError as e:
+                  logger.exception("Cognito ClientError during login")
+                  metrics.add_metric(name="LoginError", unit="Count", value=1)
+                  return _json_response(500, {"error": e.response["Error"]["Message"]})
+
+              except Exception as e:
+                  logger.exception("Unknown error during login")
+                  metrics.add_metric(name="LoginError", unit="Count", value=1)
+                  return _json_response(500, {"error": "Internal server error"})
+
       Timeout: 15
       MemorySize: 128
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
 
   CreateOrderFunction:
@@ -822,13 +863,24 @@ Resources:
       Role: !GetAtt OrderLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: "INFO"
+          POWERTOOLS_SERVICE_NAME: "create-order"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          ORDERS_TABLE_NAME: !Ref OrdersTable
+          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
+          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
       Code:
         ZipFile: |
           import json
           import os
           import uuid
-          import datetime
+          import time
           import boto3
+          from decimal import Decimal
           from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
           from aws_lambda_powertools.event_handler import APIGatewayRestResolver
@@ -865,82 +917,98 @@ Resources:
               metrics.add_metric(name="OrderCreationAttempt", unit="Count", value=1)
               
               # Get the DynamoDB table name from environment variables
-              table_name = os.environ.get('TABLE_NAME')
+              table_name = os.environ.get('ORDERS_TABLE_NAME')
               tracer.put_metadata(key="table_name", value=table_name)
               
               # Get the table resource
               table = dynamodb.Table(table_name)
               
               try:
-                  # Parse request body
-                  if not event_obj.body:
+                  # Parse the request body
+                  if event_obj.body:
+                      request_data = json.loads(event_obj.body)
+                  else:
                       return {
                           "statusCode": 400,
                           "headers": {"Content-Type": "application/json"},
                           "body": json.dumps({"error": "Missing request body"})
                       }
                   
-                  body = json.loads(event_obj.body)
-                  
                   # Validate required fields
                   required_fields = ['userId', 'items', 'shippingAddress']
-                  for field in required_fields:
-                      if field not in body:
-                          return {
-                              "statusCode": 400,
-                              "headers": {"Content-Type": "application/json"},
-                              "body": json.dumps({"error": f"Missing required field: {field}"})
-                          }
+                  missing_fields = [field for field in required_fields if field not in request_data]
                   
-                  # Create a subsegment for order creation process
-                  with tracer.capture_method("process_order_creation"):
-                      # Generate a unique order ID
-                      order_id = str(uuid.uuid4())
-                      
-                      # Calculate order total
-                      items = body['items']
-                      order_total = sum(item.get('price', 0) * item.get('quantity', 0) for item in items)
-                      
-                      # Create timestamp
-                      timestamp = str(int(datetime.datetime.now().timestamp()))
-                      
-                      # Create order item for DynamoDB
-                      order_item = {
-                          'orderId': order_id,
-                          'userId': body['userId'],
-                          'items': items,
-                          'shippingAddress': body['shippingAddress'],
-                          'orderTotal': order_total,
-                          'status': 'PENDING',
-                          'createdAt': timestamp,
-                          'updatedAt': timestamp
+                  if missing_fields:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": f"Missing required fields: {', '.join(missing_fields)}"})
                       }
-                      
-                      # Add optional fields if provided
-                      if 'paymentMethod' in body:
-                          order_item['paymentMethod'] = body['paymentMethod']
-                      
-                      if 'notes' in body:
-                          order_item['notes'] = body['notes']
-                      
-                      # Put item in DynamoDB
-                      table.put_item(Item=order_item)
-                      
-                      # Log success and add metrics
-                      logger.info("Order created successfully", extra={
-                          "orderId": order_id,
-                          "userId": body['userId'],
-                          "orderTotal": order_total
-                      })
-                      metrics.add_metric(name="OrderCreated", unit="Count", value=1)
-                      metrics.add_metric(name="OrderValue", unit="None", value=order_total)
-                      
-                      # Prepare success response
-                      response_body = {
-                          "orderId": order_id,
-                          "status": "PENDING",
-                          "message": "Order created successfully"
+                  
+                  # Validate items array
+                  if not isinstance(request_data['items'], list) or len(request_data['items']) == 0:
+                      return {
+                          "statusCode": 400,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": "Items must be a non-empty array"})
                       }
+                  
+                  # Generate a unique order ID
+                  order_id = str(uuid.uuid4())
+                  timestamp = int(time.time())
+                      
+                  # Calculate order total and convert numeric values to Decimal
+                  order_total = Decimal(sum(Decimal(str(item.get('price', 0))) * Decimal(str(item.get('quantity', 1))) for item in request_data['items']))
+                      
+                  # Convert all numeric values in items to Decimal
+                  decimal_items = []
+                  for item in request_data['items']:
+                      decimal_item = {}
+                      for key, value in item.items():
+                          if isinstance(value, (int, float)):
+                              decimal_item[key] = Decimal(str(value))
+                          else:
+                              decimal_item[key] = value
+                      decimal_items.append(decimal_item)
+                      
+                  # Prepare order data for DynamoDB
+                  order_item = {
+                      'orderId': order_id,
+                      'userId': request_data['userId'],
+                      'items': decimal_items,
+                      'shippingAddress': request_data['shippingAddress'],
+                      'orderTotal': order_total,
+                      'status': 'PENDING',
+                      'createdAt': Decimal(timestamp),
+                      'updatedAt': Decimal(timestamp)
+                  }
+                      
+                  # Add optional fields if present
+                  if 'paymentMethod' in request_data:
+                      order_item['paymentMethod'] = request_data['paymentMethod']
+                      
+                  if 'notes' in request_data:
+                      order_item['notes'] = request_data['notes']
+                      
+                  # Write to DynamoDB
+                  table.put_item(Item=order_item)
+                      
+                  # Log success and add metrics
+                  logger.info("Order created successfully", extra={
+                      "orderId": order_id,
+                      "userId": request_data['userId'],
+                      "orderTotal": order_total
+                  })
+                  metrics.add_metric(name="SuccessfulOrderCreation", unit="Count", value=1)
+                  metrics.add_metric(name="OrderValue", unit="None", value=order_total)
+                      
+                  # Prepare success response
+                  response_body = {
+                      "message": "Order created successfully",
+                      "orderId": order_id,
+                      "status": "PENDING",
+                      "orderTotal": float(order_total)  # Convert back to float for JSON response
+                  }
               
               except ClientError as e:
                   # Handle DynamoDB errors
@@ -962,7 +1030,7 @@ Resources:
               
               except Exception as e:
                   # Handle general errors
-                  logger.exception("Error creating order")
+                  logger.exception("Error processing order creation")
                   metrics.add_metric(name="ProcessingError", unit="Count", value=1)
                   
                   return {
@@ -972,27 +1040,17 @@ Resources:
                   }
               
               return {
-                  "statusCode": 201,
+                  "statusCode": 201,  # Created
                   "headers": {
                       "Content-Type": "application/json"
                   },
                   "body": json.dumps(response_body)
               }
-      Environment:
-        Variables:
-          TABLE_NAME:     !Ref OrdersTable
-          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
-          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
       Timeout: 15
       MemorySize: 128
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
 
   GetOrdersFunction:
@@ -1004,17 +1062,37 @@ Resources:
       Role: !GetAtt OrderLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: "INFO"
+          POWERTOOLS_SERVICE_NAME: "get-orders"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          ORDERS_TABLE_NAME: !Ref OrdersTable
+          TABLE_NAME:     !Ref OrdersTable
+          INDEX_NAME:     UserOrdersIndex
+          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
+          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
       Code:
         ZipFile: |
           import json
           import os
           import boto3
+          from decimal import Decimal
           from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
           from aws_lambda_powertools.event_handler import APIGatewayRestResolver
           from aws_lambda_powertools.utilities.typing import LambdaContext
           from aws_lambda_powertools.logging import correlation_paths
           from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
+          
+          # Helper class to convert Decimal to float for JSON serialization
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, o):
+                  if isinstance(o, Decimal):
+                      return float(o)
+                  return super(DecimalEncoder, self).default(o)
 
           # Initialize PowerTools
           logger = Logger(service="get-orders")
@@ -1045,7 +1123,7 @@ Resources:
               metrics.add_metric(name="OrdersListRequest", unit="Count", value=1)
               
               # Get the DynamoDB table name and index from environment variables
-              table_name = os.environ.get('TABLE_NAME')
+              table_name = os.environ.get('ORDERS_TABLE_NAME')
               index_name = os.environ.get('INDEX_NAME')
               tracer.put_metadata(key="table_name", value=table_name)
               tracer.put_metadata(key="index_name", value=index_name)
@@ -1085,51 +1163,50 @@ Resources:
                           logger.warning("Invalid nextToken", extra={"error": str(e)})
                   
                   # Create a subsegment for database operations
-                  with tracer.capture_method("process_get_orders"):
-                      # Query parameters for DynamoDB
-                      query_params = {
-                          'IndexName': index_name,
-                          'KeyConditionExpression': 'userId = :userId',
-                          'ExpressionAttributeValues': {
-                              ':userId': user_id
-                          },
-                          'Limit': limit,
-                          'ScanIndexForward': False  # Sort by most recent first
-                      }
-                      
-                      # Add ExclusiveStartKey for pagination if we have a last evaluated key
-                      if last_evaluated_key:
-                          query_params['ExclusiveStartKey'] = last_evaluated_key
-                      
-                      # Query DynamoDB
-                      response = table.query(**query_params)
-                      
-                      # Prepare items for response
-                      items = response.get('Items', [])
-                      
-                      # Prepare pagination token if there are more results
-                      next_token = None
-                      if 'LastEvaluatedKey' in response:
-                          import base64
-                          last_key_json = json.dumps(response['LastEvaluatedKey'])
-                          next_token = base64.b64encode(last_key_json.encode('utf-8')).decode('utf-8')
-                      
-                      # Log success and add metrics
-                      logger.info("Orders retrieved successfully", extra={
-                          "userId": user_id,
-                          "count": len(items)
-                      })
-                      metrics.add_metric(name="OrdersRetrieved", unit="Count", value=len(items))
-                      
-                      # Prepare success response
-                      response_body = {
-                          "orders": items,
-                          "count": len(items)
-                      }
-                      
-                      # Add pagination token if available
-                      if next_token:
-                          response_body["nextToken"] = next_token
+                  # Query parameters for DynamoDB
+                  query_params = {
+                      'IndexName': index_name,
+                      'KeyConditionExpression': 'userId = :userId',
+                      'ExpressionAttributeValues': {
+                          ':userId': user_id
+                      },
+                      'Limit': limit,
+                      'ScanIndexForward': False  # Sort by most recent first
+                  }
+                  
+                  # Add ExclusiveStartKey for pagination if we have a last evaluated key
+                  if last_evaluated_key:
+                      query_params['ExclusiveStartKey'] = last_evaluated_key
+                  
+                  # Query DynamoDB
+                  response = table.query(**query_params)
+                  
+                  # Prepare items for response
+                  items = response.get('Items', [])
+                  
+                  # Prepare pagination token if there are more results
+                  next_token = None
+                  if 'LastEvaluatedKey' in response:
+                      import base64
+                      last_key_json = json.dumps(response['LastEvaluatedKey'])
+                      next_token = base64.b64encode(last_key_json.encode('utf-8')).decode('utf-8')
+                  
+                  # Log success and add metrics
+                  logger.info("Orders retrieved successfully", extra={
+                      "userId": user_id,
+                      "count": len(items)
+                  })
+                  metrics.add_metric(name="OrdersRetrieved", unit="Count", value=len(items))
+                  
+                  # Prepare success response
+                  response_body = {
+                      "orders": items,
+                      "count": len(items)
+                  }
+                  
+                  # Add pagination token if available
+                  if next_token:
+                      response_body["nextToken"] = next_token
               
               except ClientError as e:
                   # Handle DynamoDB errors
@@ -1165,24 +1242,13 @@ Resources:
                   "headers": {
                       "Content-Type": "application/json"
                   },
-                  "body": json.dumps(response_body)
+                  "body": json.dumps(response_body, cls=DecimalEncoder)
               }
-      Environment:
-        Variables:
-          TABLE_NAME:     !Ref OrdersTable
-          INDEX_NAME:     UserOrdersIndex
-          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
-          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
       Timeout: 15
       MemorySize: 128
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
 
   GetOrderDetailsFunction:
@@ -1194,17 +1260,35 @@ Resources:
       Role: !GetAtt OrderLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: "INFO"
+          POWERTOOLS_SERVICE_NAME: "get-order-details"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          ORDERS_TABLE_NAME: !Ref OrdersTable
+          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
+          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
       Code:
         ZipFile: |
           import json
           import os
           import boto3
+          from decimal import Decimal
           from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
           from aws_lambda_powertools.event_handler import APIGatewayRestResolver
           from aws_lambda_powertools.utilities.typing import LambdaContext
           from aws_lambda_powertools.logging import correlation_paths
           from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
+          
+          # Helper class to convert Decimal to float for JSON serialization
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, o):
+                  if isinstance(o, Decimal):
+                      return float(o)
+                  return super(DecimalEncoder, self).default(o)
 
           # Initialize PowerTools
           logger = Logger(service="get-order-details")
@@ -1235,7 +1319,7 @@ Resources:
               metrics.add_metric(name="OrderDetailsRequest", unit="Count", value=1)
               
               # Get the DynamoDB table name from environment variables
-              table_name = os.environ.get('TABLE_NAME')
+              table_name = os.environ.get('ORDERS_TABLE_NAME')
               tracer.put_metadata(key="table_name", value=table_name)
               
               # Get the table resource
@@ -1258,42 +1342,40 @@ Resources:
                           "body": json.dumps({"error": "Missing required parameter: orderId"})
                       }
                   
-                  # Create a subsegment for database operations
-                  with tracer.capture_method("process_get_order_details"):
-                      # Get item from DynamoDB
-                      response = table.get_item(
-                          Key={
-                              'orderId': order_id
-                          }
-                      )
-                      
-                      # Check if the item exists
-                      if 'Item' not in response:
-                          logger.warning("Order not found", extra={"orderId": order_id})
-                          return {
-                              "statusCode": 404,
-                              "headers": {"Content-Type": "application/json"},
-                              "body": json.dumps({"error": "Order not found"})
-                          }
-                      
-                      # Get the order item
-                      order = response['Item']
-                      
-                      # Check if the user has permission to access this order
-                      # This would typically involve checking the authenticated user's ID
-                      # against the userId in the order, but for this example we'll skip that
-                      
-                      # Log success and add metrics
-                      logger.info("Order details retrieved successfully", extra={
-                          "orderId": order_id,
-                          "userId": order.get('userId')
-                      })
-                      metrics.add_metric(name="OrderDetailsRetrieved", unit="Count", value=1)
-                      
-                      # Prepare success response
-                      response_body = {
-                          "order": order
+                  # Get item from DynamoDB
+                  response = table.get_item(
+                      Key={
+                          'orderId': order_id
                       }
+                  )
+                      
+                  # Check if the item exists
+                  if 'Item' not in response:
+                      logger.warning("Order not found", extra={"orderId": order_id})
+                      return {
+                          "statusCode": 404,
+                          "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"error": "Order not found"})
+                      }
+                      
+                  # Get the order item
+                  order = response['Item']
+                      
+                  # Check if the user has permission to access this order
+                  # This would typically involve checking the authenticated user's ID
+                  # against the userId in the order, but for this example we'll skip that
+                      
+                  # Log success and add metrics
+                  logger.info("Order details retrieved successfully", extra={
+                      "orderId": order_id,
+                      "userId": order.get('userId')
+                  })
+                  metrics.add_metric(name="OrderDetailsRetrieved", unit="Count", value=1)
+                      
+                  # Prepare success response
+                  response_body = {
+                      "order": order
+                  }
               
               except ClientError as e:
                   # Handle DynamoDB errors
@@ -1329,23 +1411,13 @@ Resources:
                   "headers": {
                       "Content-Type": "application/json"
                   },
-                  "body": json.dumps(response_body)
+                  "body": json.dumps(response_body, cls=DecimalEncoder)
               }
-      Environment:
-        Variables:
-          TABLE_NAME:     !Ref OrdersTable
-          REDIS_ENDPOINT: !GetAtt RedisCacheCluster.RedisEndpoint.Address
-          REDIS_PORT:     !GetAtt RedisCacheCluster.RedisEndpoint.Port
       Timeout: 15
       MemorySize: 128
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
 
   SubmitFeedbackFunction:
@@ -1357,167 +1429,135 @@ Resources:
       Role: !GetAtt FeedbackLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: "INFO"
+          TABLE_NAME: !Ref FeedbackTable
+          POWERTOOLS_SERVICE_NAME: "submit-feedback"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          TABLE_NAME: !Ref FeedbackTable
       Code:
         ZipFile: |
           import json
           import os
           import uuid
-          import datetime
+          import time # For a simple timestamp
           import boto3
           from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
-          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
           from aws_lambda_powertools.utilities.typing import LambdaContext
           from aws_lambda_powertools.logging import correlation_paths
           from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
+          from decimal import Decimal
 
-          # Initialize PowerTools
-          logger = Logger(service="submit-feedback")
-          tracer = Tracer(service="submit-feedback")
-          metrics = Metrics(namespace="MyApp", service="submit-feedback")
+          # Initialize PowerTools - service name will be picked from POWERTOOLS_SERVICE_NAME env var
+          logger = Logger() 
+          tracer = Tracer()
+          metrics = Metrics()
 
-          # Initialize DynamoDB client
           dynamodb = boto3.resource('dynamodb')
+          TABLE_NAME = os.environ.get('TABLE_NAME') 
 
-          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, o):
+                  if isinstance(o, Decimal):
+                      return float(o)
+                  return super(DecimalEncoder, self).default(o)
+
+          def _json_response(status_code, body):
+              return {
+                  "statusCode": status_code,
+                  "headers": {
+                      "Content-Type": "application/json",
+                      "Access-Control-Allow-Origin": "*" 
+                  },
+                  "body": json.dumps(body, cls=DecimalEncoder)
+              }
+
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST, log_event=True) 
           @tracer.capture_lambda_handler
           @metrics.log_metrics(capture_cold_start_metric=True)
           def lambda_handler(event, context: LambdaContext):
-              # Create API Gateway event object for easier parsing
               event_obj = APIGatewayProxyEvent(event)
-              function_name = context.function_name
-              
-              # Log structured information
-              logger.info("Function invoked", extra={
-                  "function_name": function_name,
-                  "request_id": context.aws_request_id
-              })
-              
-              # Add custom annotation for X-Ray
-              tracer.put_annotation(key="function_name", value=function_name)
-              
-              # Add business metrics
-              metrics.add_metric(name="FeedbackSubmission", unit="Count", value=1)
-              
-              # Get the DynamoDB table name from environment variables
-              table_name = os.environ.get('TABLE_NAME')
-              tracer.put_metadata(key="table_name", value=table_name)
-              
-              # Get the table resource
-              table = dynamodb.Table(table_name)
               
               try:
-                  # Parse request body
+                  if not TABLE_NAME:
+                      logger.error("TABLE_NAME environment variable not set.")
+                      # This internal config error should ideally not happen if CFN is correct
+                      return _json_response(500, {"error": "Server configuration error."}) 
+                  table = dynamodb.Table(TABLE_NAME)
+
                   if not event_obj.body:
-                      return {
-                          "statusCode": 400,
-                          "headers": {"Content-Type": "application/json"},
-                          "body": json.dumps({"error": "Missing request body"})
-                      }
+                      logger.warn("Request body is missing for feedback submission.")
+                      return _json_response(400, {"error": "Missing request body"})
+
+                  data = json.loads(event_obj.body)
+                  logger.info("Received feedback submission request", extra={"payload_keys": list(data.keys())})
+
+                  user_id = data.get("userId")
+                  rating = data.get("rating")
+                  comment = data.get("comment")
+
+                  if not all([user_id, rating is not None, comment]):
+                      missing_fields = []
+                      if not user_id: missing_fields.append("userId")
+                      if rating is None: missing_fields.append("rating")
+                      if not comment: missing_fields.append("comment")
+                      logger.warn("Missing required fields in feedback", extra={"missing_fields": missing_fields})
+                      return _json_response(400, {"error": f"Missing required fields: {', '.join(missing_fields)}"})
+
+                  try:
+                      rating_val = int(rating)
+                  except ValueError:
+                      logger.warn("Invalid rating format, not an integer.", extra={"rating_received": rating})
+                      return _json_response(400, {"error": "Rating must be an integer."})
+
+                  feedback_id = str(uuid.uuid4())
+                  timestamp_now = int(time.time())
+
+                  feedback_item = {
+                      'feedbackId': feedback_id,
+                      'userId': user_id,
+                      'rating': rating_val,
+                      'comment': comment,
+                      'createdAt': Decimal(timestamp_now)
+                  }
                   
-                  body = json.loads(event_obj.body)
-                  
-                  # Validate required fields
-                  required_fields = ['userId', 'rating', 'comment']
-                  for field in required_fields:
-                      if field not in body:
-                          return {
-                              "statusCode": 400,
-                              "headers": {"Content-Type": "application/json"},
-                              "body": json.dumps({"error": f"Missing required field: {field}"})
-                          }
-                  
-                  # Create a subsegment for feedback submission process
-                  with tracer.capture_method("process_feedback_submission"):
-                      # Generate a unique feedback ID
-                      feedback_id = str(uuid.uuid4())
-                      
-                      # Create timestamp
-                      timestamp = str(int(datetime.datetime.now().timestamp()))
-                      
-                      # Create feedback item for DynamoDB
-                      feedback_item = {
-                          'feedbackId': feedback_id,
-                          'userId': body['userId'],
-                          'rating': body['rating'],
-                          'comment': body['comment'],
-                          'createdAt': timestamp
-                      }
-                      
-                      # Add optional fields if provided
-                      if 'orderId' in body:
-                          feedback_item['orderId'] = body['orderId']
-                      
-                      if 'category' in body:
-                          feedback_item['category'] = body['category']
-                      
-                      # Put item in DynamoDB
-                      table.put_item(Item=feedback_item)
-                      
-                      # Log success and add metrics
-                      logger.info("Feedback submitted successfully", extra={
-                          "feedbackId": feedback_id,
-                          "userId": body['userId'],
-                          "rating": body['rating']
-                      })
-                      metrics.add_metric(name="FeedbackRecorded", unit="Count", value=1)
-                      metrics.add_metric(name="FeedbackRating", unit="None", value=int(body['rating']))
-                      
-                      # Prepare success response
-                      response_body = {
-                          "feedbackId": feedback_id,
-                          "message": "Feedback submitted successfully"
-                      }
-              
+                  if "orderId" in data:
+                      feedback_item['orderId'] = data['orderId']
+                  if "category" in data:
+                      feedback_item['category'] = data['category']
+
+                  table.put_item(Item=feedback_item)
+                  logger.info("Feedback submitted successfully to DynamoDB", extra={"feedbackId": feedback_id, "userId": user_id})
+                  metrics.add_metric(name="FeedbackSubmitted", unit="Count", value=1)
+                  metrics.add_metric(name="FeedbackRating", unit="None", value=rating_val)
+
+                  response_body = {
+                      "message": "Feedback submitted successfully",
+                      "feedbackId": feedback_id
+                  }
+                  return _json_response(201, response_body)
+
               except ClientError as e:
-                  # Handle DynamoDB errors
-                  error_code = e.response['Error']['Code']
-                  error_message = e.response['Error']['Message']
-                  
-                  logger.error("DynamoDB error", extra={
-                      "error_code": error_code,
-                      "error_message": error_message
-                  })
-                  
-                  metrics.add_metric(name="DatabaseError", unit="Count", value=1)
-                  
-                  return {
-                      "statusCode": 500,
-                      "headers": {"Content-Type": "application/json"},
-                      "body": json.dumps({"error": "Database operation failed"})
-                  }
-              
+                  logger.exception("DynamoDB error during feedback submission")
+                  metrics.add_metric(name="FeedbackSubmissionErrorDB", unit="Count", value=1)
+                  return _json_response(500, {"error": "Could not submit feedback due to a database issue."})
+              except json.JSONDecodeError:
+                  logger.warn("Invalid JSON in request body for feedback submission.") # Use warn or exception based on preference
+                  metrics.add_metric(name="FeedbackSubmissionErrorFormat", unit="Count", value=1)
+                  return _json_response(400, {"error": "Invalid JSON format in request body."})
               except Exception as e:
-                  # Handle general errors
-                  logger.exception("Error submitting feedback")
-                  metrics.add_metric(name="ProcessingError", unit="Count", value=1)
-                  
-                  return {
-                      "statusCode": 500,
-                      "headers": {"Content-Type": "application/json"},
-                      "body": json.dumps({"error": "Internal server error"})
-                  }
-              
-              return {
-                  "statusCode": 201,
-                  "headers": {
-                      "Content-Type": "application/json"
-                  },
-                  "body": json.dumps(response_body)
-              }
-      Environment:
-        Variables:
-          TABLE_NAME: !Ref FeedbackTable
+                  logger.exception("Unexpected error processing feedback submission")
+                  metrics.add_metric(name="FeedbackSubmissionErrorUnexpected", unit="Count", value=1)
+                  return _json_response(500, {"error": f"An unexpected error occurred."})
       Timeout: 15
       MemorySize: 128
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
 
   GetAnalyticsFunction:
@@ -1529,166 +1569,137 @@ Resources:
       Role: !GetAtt AnalyticsLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          DB_SECRET_NAME: !Ref DBPasswordSecret
+          LOG_LEVEL: "INFO"
+          POWERTOOLS_SERVICE_NAME: "get-analytics"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          ORDERS_TABLE_NAME: !Ref OrdersTable
+          CUSTOMERS_TABLE_NAME: !Ref CustomersTable
+          RDS_ENDPOINT:    !GetAtt AnalyticsDBInstance.Endpoint.Address
+          RDS_PORT:        !GetAtt AnalyticsDBInstance.Endpoint.Port
+          RDS_DB_NAME:     !Sub "${ProjectName}AnalyticsDB"
+          RDS_SECRET_ARN:  !Ref DBPasswordSecret
       Code:
         ZipFile: |
           import json
           import os
           import boto3
+          from decimal import Decimal
           from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
-          from aws_lambda_powertools.event_handler import APIGatewayRestResolver
           from aws_lambda_powertools.utilities.typing import LambdaContext
           from aws_lambda_powertools.logging import correlation_paths
           from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent
 
-          # Initialize PowerTools
-          logger = Logger(service="get-analytics")
-          tracer = Tracer(service="get-analytics")
-          metrics = Metrics(namespace="MyApp", service="get-analytics")
+          # Initialize PowerTools - service name will be picked from POWERTOOLS_SERVICE_NAME env var
+          logger = Logger() 
+          tracer = Tracer()
+          metrics = Metrics()
 
-          # Initialize DynamoDB client
           dynamodb = boto3.resource('dynamodb')
 
-          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST)
+          CUSTOMERS_TABLE_NAME = os.environ.get('CUSTOMERS_TABLE_NAME')
+          ORDERS_TABLE_NAME = os.environ.get('ORDERS_TABLE_NAME')
+
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, o):
+                  if isinstance(o, Decimal):
+                      return float(o)
+                  return super(DecimalEncoder, self).default(o)
+
+          def _json_response(status_code, body):
+              return {
+                  "statusCode": status_code,
+                  "headers": {
+                      "Content-Type": "application/json",
+                      "Access-Control-Allow-Origin": "*" 
+                  },
+                  "body": json.dumps(body, cls=DecimalEncoder)
+              }
+
+          @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_REST, log_event=True)
           @tracer.capture_lambda_handler
           @metrics.log_metrics(capture_cold_start_metric=True)
           def lambda_handler(event, context: LambdaContext):
-              # Create API Gateway event object for easier parsing
               event_obj = APIGatewayProxyEvent(event)
-              function_name = context.function_name
+              logger.info("GetAnalyticsFunction invoked.")
               
-              # Log structured information
-              logger.info("Function invoked", extra={
-                  "function_name": function_name,
-                  "request_id": context.aws_request_id
-              })
-              
-              # Add custom annotation for X-Ray
-              tracer.put_annotation(key="function_name", value=function_name)
-              
-              # Add business metrics
-              metrics.add_metric(name="AnalyticsRequest", unit="Count", value=1)
-              
-              # Get the DynamoDB table names from environment variables
-              orders_table_name = os.environ.get('ORDERS_TABLE')
-              customers_table_name = os.environ.get('CUSTOMERS_TABLE')
-              tracer.put_metadata(key="orders_table", value=orders_table_name)
-              tracer.put_metadata(key="customers_table", value=customers_table_name)
-              
-              # Get the table resources
-              orders_table = dynamodb.Table(orders_table_name)
-              customers_table = dynamodb.Table(customers_table_name)
+              analytics_data = {}
               
               try:
-                  # Get query parameters
-                  query_params = event_obj.query_string_parameters or {}
-                  report_type = query_params.get('reportType', 'summary')
-                  
-                  # Create a subsegment for analytics processing
-                  with tracer.capture_method("process_analytics"):
-                      analytics_data = {}
+                  # 1. DynamoDB Analytics (Customers Table)
+                  if CUSTOMERS_TABLE_NAME:
+                      customers_table = dynamodb.Table(CUSTOMERS_TABLE_NAME)
+                      logger.info(f"Scanning Customers table: {CUSTOMERS_TABLE_NAME}")
+                      # Note: Scan is not efficient for large tables. 
+                      # For COUNT, scan with Select='COUNT' is better than fetching all items.
+                      customer_scan_result = customers_table.scan(Select='COUNT')
+                      analytics_data['totalCustomers'] = customer_scan_result.get('Count', 0)
+                      logger.info(f"Total customers: {analytics_data['totalCustomers']}")
+                  else:
+                      logger.warn("CUSTOMERS_TABLE_NAME not configured. Skipping customer analytics.")
+                      analytics_data['totalCustomers'] = "Not Configured"
+
+                  # 2. DynamoDB Analytics (Orders Table)
+                  if ORDERS_TABLE_NAME:
+                      orders_table = dynamodb.Table(ORDERS_TABLE_NAME)
+                      logger.info(f"Scanning Orders table: {ORDERS_TABLE_NAME}")
+                      # Note: Scan is not efficient for large tables. 
+                      # Fetching specific attributes is better than fetching all.
+                      order_scan_result = orders_table.scan(
+                          ProjectionExpression="orderId, orderTotal, #s", # #s is a placeholder for status attribute
+                          ExpressionAttributeNames={"#s": "status"} # Define placeholder for reserved keyword 'status'
+                      ) 
+                      orders = order_scan_result.get('Items', [])
                       
-                      # Get customer count
-                      with tracer.capture_method("get_customer_count"):
-                          # Scan customers table to get count (for demo purposes only - not efficient for large tables)
-                          customer_scan = customers_table.scan(Select='COUNT')
-                          customer_count = customer_scan.get('Count', 0)
-                          analytics_data['customerCount'] = customer_count
+                      # Handle potential pagination if 'LastEvaluatedKey' is present (for very large tables)
+                      # This basic example does not implement full pagination for scan.
+                      # while 'LastEvaluatedKey' in order_scan_result:
+                      #    logger.info("Paginating orders scan...")
+                      #    order_scan_result = orders_table.scan(
+                      #        ProjectionExpression="orderId, orderTotal, #s",
+                      #        ExpressionAttributeNames={"#s": "status"},
+                      #        ExclusiveStartKey=order_scan_result['LastEvaluatedKey']
+                      #    )
+                      #    orders.extend(order_scan_result.get('Items', []))
+
+                      analytics_data['totalOrders'] = len(orders)
+                      total_revenue = sum(order.get('orderTotal', Decimal(0)) for order in orders) # Ensure orderTotal is Decimal
+                      analytics_data['totalRevenue'] = total_revenue # Will be float after JSON encoding via DecimalEncoder
                       
-                      # Get order metrics
-                      with tracer.capture_method("get_order_metrics"):
-                          # Scan orders table to get basic metrics (for demo purposes only - not efficient for large tables)
-                          order_scan = orders_table.scan()
-                          orders = order_scan.get('Items', [])
-                          
-                          # Calculate order metrics
-                          order_count = len(orders)
-                          total_revenue = sum(float(order.get('orderTotal', 0)) for order in orders)
-                          avg_order_value = total_revenue / order_count if order_count > 0 else 0
-                          
-                          # Add metrics to response
-                          analytics_data['orderCount'] = order_count
-                          analytics_data['totalRevenue'] = total_revenue
-                          analytics_data['averageOrderValue'] = avg_order_value
+                      status_counts = {}
+                      for order in orders:
+                          status = order.get('status', 'UNKNOWN')
+                          status_counts[status] = status_counts.get(status, 0) + 1
+                      analytics_data['orderStatusDistribution'] = status_counts
                       
-                      # Add more detailed analytics based on report type
-                      if report_type == 'detailed':
-                          # Get status distribution
-                          status_counts = {}
-                          for order in orders:
-                              status = order.get('status', 'UNKNOWN')
-                              status_counts[status] = status_counts.get(status, 0) + 1
-                          
-                          analytics_data['orderStatusDistribution'] = status_counts
+                      logger.info(f"Analytics from DynamoDB: Total orders: {analytics_data['totalOrders']}, Total revenue: {analytics_data['totalRevenue']}")
+                  else:
+                      logger.warn("ORDERS_TABLE_NAME not configured. Skipping order analytics.")
+                      analytics_data['totalOrders'] = "Not Configured"
+                      analytics_data['totalRevenue'] = "Not Configured"
+                      analytics_data['orderStatusDistribution'] = "Not Configured"
                       
-                      # Log success and add metrics
-                      logger.info("Analytics data retrieved successfully", extra={
-                          "reportType": report_type,
-                          "customerCount": customer_count,
-                          "orderCount": order_count
-                      })
-                      metrics.add_metric(name="AnalyticsDataRetrieved", unit="Count", value=1)
-                      
-                      # Prepare success response
-                      response_body = {
-                          "analytics": analytics_data,
-                          "reportType": report_type
-                      }
-              
+                  metrics.add_metric(name="AnalyticsReportGenerated", unit="Count", value=1)
+                  return _json_response(200, {"analyticsReport": analytics_data})
+
               except ClientError as e:
-                  # Handle DynamoDB errors
-                  error_code = e.response['Error']['Code']
-                  error_message = e.response['Error']['Message']
-                  
-                  logger.error("DynamoDB error", extra={
-                      "error_code": error_code,
-                      "error_message": error_message
-                  })
-                  
-                  metrics.add_metric(name="DatabaseError", unit="Count", value=1)
-                  
-                  return {
-                      "statusCode": 500,
-                      "headers": {"Content-Type": "application/json"},
-                      "body": json.dumps({"error": "Database operation failed"})
-                  }
-              
+                  logger.exception("DynamoDB error during analytics generation")
+                  metrics.add_metric(name="AnalyticsErrorDB", unit="Count", value=1)
+                  return _json_response(500, {"error": "Could not generate analytics due to a database issue."})
               except Exception as e:
-                  # Handle general errors
-                  logger.exception("Error retrieving analytics data")
-                  metrics.add_metric(name="ProcessingError", unit="Count", value=1)
-                  
-                  return {
-                      "statusCode": 500,
-                      "headers": {"Content-Type": "application/json"},
-                      "body": json.dumps({"error": "Internal server error"})
-                  }
-              
-              return {
-                  "statusCode": 200,
-                  "headers": {
-                      "Content-Type": "application/json"
-                  },
-                  "body": json.dumps(response_body)
-              }
-      Environment:
-        Variables:
-          ORDERS_TABLE:    !Ref OrdersTable
-          CUSTOMERS_TABLE: !Ref CustomersTable
-          RDS_ENDPOINT:    !GetAtt AnalyticsDBInstance.Endpoint.Address
-          RDS_PORT:        !GetAtt AnalyticsDBInstance.Endpoint.Port
-          RDS_DB_NAME:     !Sub "${ProjectName}AnalyticsDB"
-          RDS_SECRET_ARN:  !Ref DBPasswordSecret
+                  logger.exception("Unexpected error generating analytics report")
+                  metrics.add_metric(name="AnalyticsErrorUnexpected", unit="Count", value=1)
+                  return _json_response(500, {"error": f"An unexpected error occurred."})
       Timeout: 60
       MemorySize: 256
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
 
   PaymentStepLambdaFunction:
@@ -1700,20 +1711,40 @@ Resources:
       Role: !GetAtt PaymentStepLambdaRole.Arn
       Layers:
         - !Ref PowertoolsLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: "INFO"
+          POWERTOOLS_SERVICE_NAME: "payment-step"
+          POWERTOOLS_LOGGER_LOG_EVENT: "true"
+          POWERTOOLS_LOGGER_SAMPLE_RATE: "1"
+          POWERTOOLS_METRICS_NAMESPACE: "MyApp"
+          ORDERS_TABLE_NAME: !Ref OrdersTable
       Code:
         ZipFile: |
           import json
           import os
           import boto3
           import datetime
+          from decimal import Decimal
           from botocore.exceptions import ClientError
           from aws_lambda_powertools import Logger, Tracer, Metrics
           from aws_lambda_powertools.utilities.typing import LambdaContext
+          
+          # Helper class to convert Decimal to float for JSON serialization
+          class DecimalEncoder(json.JSONEncoder):
+              def default(self, o):
+                  if isinstance(o, Decimal):
+                      return float(o)
+                  return super(DecimalEncoder, self).default(o)
 
           # Initialize PowerTools
-          logger = Logger(service="payment-step")
-          tracer = Tracer(service="payment-step")
-          metrics = Metrics(namespace="MyApp", service="payment-step")
+          logger = Logger()
+          tracer = Tracer()
+          metrics = Metrics()
+          
+          # Explicitly set log level from environment variable
+          log_level = os.environ.get("LOG_LEVEL", "INFO")
+          logger.setLevel(log_level)
 
           # Initialize DynamoDB client
           dynamodb = boto3.resource('dynamodb')
@@ -1748,21 +1779,19 @@ Resources:
                   }
               
               # Get the DynamoDB table name from environment variables or event
-              table_name = os.environ.get('ORDERS_TABLE', event.get('ordersTable'))
+              table_name = os.environ.get('ORDERS_TABLE_NAME', event.get('ordersTable'))
               tracer.put_metadata(key="table_name", value=table_name)
               
               try:
-                  # Create a subsegment for payment processing
-                  with tracer.capture_method("process_payment"):
-                      # Get the table resource
-                      table = dynamodb.Table(table_name)
-                      
-                      # Get the order from DynamoDB
-                      response = table.get_item(
-                          Key={
-                              'orderId': order_id
-                          }
-                      )
+                  # Get the table resource
+                  table = dynamodb.Table(table_name)
+                  
+                  # Get the order from DynamoDB
+                  response = table.get_item(
+                      Key={
+                          'orderId': order_id
+                      }
+                  )
                       
                       # Check if the order exists
                       if 'Item' not in response:
@@ -1812,7 +1841,7 @@ Resources:
                       metrics.add_metric(name="PaymentAmount", unit="None", value=float(order.get('orderTotal', 0)))
                       
                       # Prepare success response
-                      return {
+                      response = {
                           'statusCode': 200,
                           'orderId': order_id,
                           'paymentId': payment_id,
@@ -1820,6 +1849,9 @@ Resources:
                           'orderStatus': 'PAID',
                           'timestamp': timestamp
                       }
+                      
+                      # Convert any Decimal values to float for JSON serialization
+                      return json.loads(json.dumps(response, cls=DecimalEncoder))
               
               except ClientError as e:
                   # Handle DynamoDB errors
@@ -1850,19 +1882,11 @@ Resources:
                       'error': "Internal server error",
                       'paymentStatus': 'FAILED'
                   }
-      Environment:
-        Variables:
-          ORDERS_TABLE: !Ref OrdersTable
       Timeout: 30
       MemorySize: 128
       TracingConfig:
         Mode: Active
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref LambdaSecurityGroup
-        SubnetIds:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+
 
   ### Step Functions ###
   PaymentProcessingStateMachine:
@@ -2328,27 +2352,8 @@ Resources:
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/GET/analytics
 
   ############################################
-  ## 1) ASYNCHRONOUS & REAL-TIME INTEGRATION ##
+  ## 1) ASYNCHRONOUS & REAL-TIME INTEGRATION POTENTIAL UPGRADE OF INFRASTRUCTURE ##
   ############################################
-
-  # # EventBridge bus for cross-service events
-  # EnterpriseEventBus:
-  #   Type: AWS::Events::EventBus
-  #   Properties:
-  #     Name: !Sub "${ProjectName}-EnterpriseBus"
-
-  # # Route all order-related events to the bus
-  # OrdersEventRule:
-  #   Type: AWS::Events::Rule
-  #   Properties:
-  #     Name: !Sub "${ProjectName}-OrderEventsRule"
-  #     EventBusName: !Ref EnterpriseEventBus
-  #     EventPattern:
-  #       source:
-  #         - "com.mycompany.orders"
-  #     Targets:
-  #       - Arn: !GetAtt MyOrderProcessorLambda.Arn
-  #         Id: "EnterpriseBusTarget"
 
   # AppSync GraphQL API for real-time subscriptions
   AppSyncGraphQLApi:
@@ -2649,3 +2654,23 @@ Outputs:
   #     Action: lambda:InvokeFunction
   #     Principal: events.amazonaws.com
   #     SourceArn: !GetAtt OrdersEventRule.Arn
+
+# POTENTIAL UPGRADE EXAMPLE
+  # # EventBridge bus for cross-service events
+  # EnterpriseEventBus:
+  #   Type: AWS::Events::EventBus
+  #   Properties:
+  #     Name: !Sub "${ProjectName}-EnterpriseBus"
+# NOT WORKING EXAMPLE
+  # # Route all order-related events to the bus
+  # OrdersEventRule:
+  #   Type: AWS::Events::Rule
+  #   Properties:
+  #     Name: !Sub "${ProjectName}-OrderEventsRule"
+  #     EventBusName: !Ref EnterpriseEventBus
+  #     EventPattern:
+  #       source:
+  #         - "com.mycompany.orders"
+  #     Targets:
+  #       - Arn: !GetAtt MyOrderProcessorLambda.Arn
+  #         Id: "EnterpriseBusTarget"

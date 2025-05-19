@@ -294,13 +294,16 @@ The `template.yaml` automates the enterprise-grade environment. Key sections:
 Deploy via AWS CLI:
 
 ```bash
-aws cloudformation deploy \
-  --stack-name enterprise-backend-stack \
-  --template-file template.yaml \
-  --parameter-overrides \
-    ProjectName=MyEnterpriseProj \
-    DbPasswordSecretName=MyEnterpriseDbSecret \
-  --capabilities CAPABILITY_NAMED_IAM
+sam build
+
+sam deploy `
+  --stack-name enterprise-backend-stack `
+  --template-file template.yaml `
+  --parameter-overrides `
+    ProjectName=myenterpriseproj `
+    DbPasswordSecretName=MyEnterpriseDbSecret `
+  --capabilities CAPABILITY_NAMED_IAM `
+  --s3-bucket=aws-sam-cli-managed-default-samclisourcebucket-5pxpxnglaqld
 ```
 
 Monitor stack events in the AWS CloudFormation Console. Once deployed, retrieve outputs for API endpoints and resource identifiers.

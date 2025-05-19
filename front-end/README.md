@@ -49,7 +49,7 @@ This repository contains a simple Next.js front‑end for a Task Manager applica
 
 ## Prerequisites
 
-* Node.js v16+ and npm or Yarn
+* Node.js v20+ and npm or Yarn
 * Next.js v13+
 
 ---

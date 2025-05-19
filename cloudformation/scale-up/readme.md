@@ -211,13 +211,14 @@ The `template.yaml` brings up a complete scale‑up environment. Below is a summ
 ## Deployment Instructions
 
 ```bash
-aws cloudformation deploy \
-  --stack-name scaleup-backend-stack \
-  --template-file template.yaml \
-  --parameter-overrides \
-     ProjectName=MyScaleUpProj \
-     DbPasswordSecretName=MyScaleUpDbSecret \
+aws cloudformation deploy `
+  --stack-name scaleup-backend-stack `
+  --template-file template.yaml `
+  --parameter-overrides `
+     ProjectName=MyScaleUpProj `
+     DbPasswordSecretName=MyScaleUpDbSecret `
   --capabilities CAPABILITY_NAMED_IAM
+  --s3-bucket=aws-sam-cli-managed-default-samclisourcebucket-5pxpxnglaqld
 ```
 
 Monitor progress in the CloudFormation console. Once complete, note the `ApiEndpoint` output for your REST APIs.
