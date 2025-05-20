@@ -3,7 +3,8 @@
 
 import { DEFAULT_CONFIG, API_ENDPOINTS } from '../config/aws-config';
 
-const API_URL = DEFAULT_CONFIG.API_URL;
+// Ensure we're using the correct API URL from aws-config.ts
+const API_URL = API_ENDPOINTS.BASE_URL;
 
 export interface UserCredentials {
   email: string;

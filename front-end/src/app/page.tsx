@@ -53,26 +53,6 @@ export default function Home() {
 
         {/* API Connection Status */}
         <section className="w-full py-8 sm:py-10 md:py-12 px-4 sm:px-6 bg-white shadow-lg mt-8 sm:mt-12 md:mt-16 rounded-xl max-w-6xl mx-auto border border-gray-100">
-          <div className="text-center mb-6 sm:mb-8 md:mb-10">
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-indigo-900 mb-2 sm:mb-3">Backend Connection Status</h2>
-            <p className="text-gray-700 text-base sm:text-lg">This application is connected to a serverless AWS backend</p>
-          </div>
-          
-          <div className="flex justify-center items-center mb-6 sm:mb-8 md:mb-10">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center bg-gray-50 px-4 sm:px-6 md:px-8 py-4 sm:py-5 md:py-6 rounded-lg shadow-md border border-gray-200 w-full max-w-md">
-              <div className="mb-3 sm:mb-0 sm:mr-5 self-center sm:self-auto">
-                <div className={`h-5 w-5 sm:h-6 sm:w-6 rounded-full ${apiStatus === 'loading' ? 'bg-yellow-400 animate-pulse' : apiStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'} shadow-sm`}></div>
-              </div>
-              <div>
-                <p className="font-semibold text-base sm:text-lg text-gray-900 text-center sm:text-left">
-                  API Status: {apiStatus === 'loading' ? 'Connecting...' : apiStatus === 'connected' ? 'Connected' : 'Connection Error'}
-                </p>
-                <p className="text-gray-600 mt-1 text-sm sm:text-base text-center sm:text-left">
-                  {apiStatus === 'connected' ? 'Successfully connected to backend services' : apiStatus === 'loading' ? 'Establishing connection to backend services' : 'Failed to connect to backend services'}
-                </p>
-              </div>
-            </div>
-          </div>
 
           {isAuthenticated ? (
             <div className="text-center bg-indigo-100 p-4 sm:p-6 md:p-8 rounded-lg mb-6 sm:mb-8 shadow-inner border border-indigo-200">
@@ -139,18 +119,6 @@ export default function Home() {
             </div>
           </div>
         </section>
-
-        {/* Footer Section */}
-        <footer className="w-full py-6 sm:py-8 bg-indigo-950 text-white text-center mt-auto">
-          <div className="container mx-auto px-4">
-            <p className="text-base sm:text-lg">&copy; {new Date().getFullYear()} TaskFlow. All rights reserved.</p>
-            <div className="mt-3 sm:mt-4 flex justify-center space-x-4 sm:space-x-6">
-              <a href="#" className="text-sm sm:text-base text-indigo-300 hover:text-white transition-colors">Terms</a>
-              <a href="#" className="text-sm sm:text-base text-indigo-300 hover:text-white transition-colors">Privacy</a>
-              <a href="#" className="text-sm sm:text-base text-indigo-300 hover:text-white transition-colors">Contact</a>
-            </div>
-          </div>
-        </footer>
       </main>
   );
 }

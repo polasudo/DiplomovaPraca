@@ -1,17 +1,29 @@
 // API Service for centralized API calls
 import { API_ENDPOINTS, DEFAULT_CONFIG } from '../config/aws-config';
+import { getAuthToken } from './authService';
 
 const API_BASE_URL = DEFAULT_CONFIG.API_URL;
 
 // Generic fetch function with error handling
-async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
+async function fetchAPI<T>(endpoint: string, options?: RequestInit, requiresAuth: boolean = true): Promise<T> {
   try {
+    // Add authentication token for endpoints that require it
+    let headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    };
+    
+    // Add auth header if required and token exists
+    if (requiresAuth) {
+      const token = getAuthToken();
+      if (token) {
+        headers = { ...headers, Authorization: `Bearer ${token}` };
+      }
+    }
+    
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {

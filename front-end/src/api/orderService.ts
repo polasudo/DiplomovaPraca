@@ -2,6 +2,7 @@
 // Handles order creation, retrieval, and management
 
 import { DEFAULT_CONFIG, API_ENDPOINTS } from '../config/aws-config';
+import { getAuthToken } from './authService';
 
 const API_URL = DEFAULT_CONFIG.API_URL;
 
@@ -34,7 +35,7 @@ export interface CreateOrderRequest {
  */
 export const createOrder = async (orderData: CreateOrderRequest): Promise<Order> => {
   try {
-    const token = localStorage.getItem('authToken');
+    const token = getAuthToken();
     
     if (!token) {
       throw new Error('Authentication required');
@@ -66,7 +67,7 @@ export const createOrder = async (orderData: CreateOrderRequest): Promise<Order>
  */
 export const getUserOrders = async (): Promise<Order[]> => {
   try {
-    const token = localStorage.getItem('authToken');
+    const token = getAuthToken();
     
     if (!token) {
       throw new Error('Authentication required');
@@ -95,7 +96,7 @@ export const getUserOrders = async (): Promise<Order[]> => {
  */
 export const getOrderById = async (orderId: string): Promise<Order> => {
   try {
-    const token = localStorage.getItem('authToken');
+    const token = getAuthToken();
     
     if (!token) {
       throw new Error('Authentication required');
@@ -124,7 +125,7 @@ export const getOrderById = async (orderId: string): Promise<Order> => {
  */
 export const cancelOrder = async (orderId: string): Promise<Order> => {
   try {
-    const token = localStorage.getItem('authToken');
+    const token = getAuthToken();
     
     if (!token) {
       throw new Error('Authentication required');

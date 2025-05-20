@@ -8,7 +8,7 @@
 // API Gateway endpoints
 export const API_ENDPOINTS = {
   // Main API Gateway endpoint from scale-up template
-  BASE_URL: "https://pytvmd5t48.execute-api.eu-central-1.amazonaws.com/showcase",
+  BASE_URL: "https://bunmjxpmhb.execute-api.eu-central-1.amazonaws.com/showcase",
   
   // API paths for different resources
   PATHS: {

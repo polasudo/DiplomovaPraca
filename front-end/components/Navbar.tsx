@@ -47,11 +47,6 @@ const Navbar = () => {
             </Link>
           </li>
           <li>
-            <Link href="/tasks" className="hover:text-gray-300 py-2 px-3 rounded-md hover:bg-gray-800 transition-colors">
-              Tasks
-            </Link>
-          </li>
-          <li>
             <Link href="/products" className="hover:text-gray-300 py-2 px-3 rounded-md hover:bg-gray-800 transition-colors">
               Products
             </Link>
@@ -94,7 +89,7 @@ const Navbar = () => {
         </ul>
 
         {/* Mobile Menu Button */}
-        <div className="md:hidden">
+        <div className=" md:hidden">
           <button
             onClick={() => setToggle(!toggle)}
             className="text-white focus:outline-none p-2 rounded-md hover:bg-gray-800 transition-colors"
@@ -117,11 +112,6 @@ const Navbar = () => {
             <li>
               <Link href="/" className="block py-2 px-3 rounded-md hover:bg-gray-800 hover:text-gray-300 transition-colors">
                 Home
-              </Link>
-            </li>
-            <li>
-              <Link href="/tasks" className="block py-2 px-3 rounded-md hover:bg-gray-800 hover:text-gray-300 transition-colors">
-                Tasks
               </Link>
             </li>
             <li>

@@ -310,6 +310,206 @@ Monitor stack events in the AWS CloudFormation Console. Once deployed, retrieve 
 
 ---
 
+# TESTING
+1. Set API Endpoint, Cognito User Pool ID, and Client ID:
+```
+$ApiEndpoint = ""
+$CognitoUserPoolId = ""
+$CognitoUserPoolClientId = ""
+```
+2. Initialize/Reset Test Variables (with a new unique email):
+```
+$IdToken = $null
+$UserId = $null
+$OrderId = $null
+$Global:psNewRunEmail = "newrun" + (Get-Date -Format "yyyyMMddHHmmss") + "@example.com"
+$Global:psNewRunPassword = "ComplexP@ss" + (Get-Random -Minimum 1000 -Maximum 9999) # Example
+Write-Host "Using new email for registration: $($Global:psNewRunEmail)"
+Write-Host "Using password: $($Global:psNewRunPassword)"
+```
+3. Registration:
+```
+<!-- Define Registration Payload: -->
+$registerPayload = @{
+    email = $Global:psNewRunEmail
+    password = $Global:psNewRunPassword
+    firstName = "NewRun"
+    lastName = "Test"
+    phoneNumber = "+1" + (Get-Random -Minimum 1000000000 -Maximum 1999999999) 
+} | ConvertTo-Json
+
+<!-- Send Registration Request: -->
+Write-Host "Attempting to register new user: $($Global:psNewRunEmail)"
+try {
+    $registerResponse = Invoke-RestMethod -Uri "$ApiEndpoint/register" -Method Post -Body $registerPayload -ContentType "application/json" -ErrorAction Stop
+    Write-Host "✅ Registration successful!" -ForegroundColor Green
+    $registerResponse | ConvertTo-Json -Depth 3 | Write-Output
+    $UserId = $registerResponse.userSub 
+    Write-Host "Registered UserId (userSub): $UserId"
+} catch {
+    Write-Host "❌ Registration failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+
+```
+
+4. Login:
+```
+<!-- Define Login Payload: -->
+$loginPayload = @{
+    email = $Global:psNewRunEmail
+    password = $Global:psNewRunPassword
+} | ConvertTo-Json
+
+
+<!-- Send Login Request: -->
+Write-Host "Attempting to login user: $($Global:psNewRunEmail)"
+try {
+    $loginResponse = Invoke-RestMethod -Uri "$ApiEndpoint/login" -Method Post -Body $loginPayload -ContentType "application/json" -ErrorAction Stop
+    Write-Host "✅ Login successful!" -ForegroundColor Green
+    $loginResponse | ConvertTo-Json -Depth 3 | Write-Output
+    $IdToken = $loginResponse.idToken
+    Write-Host "ID Token captured successfully."
+} catch {
+    Write-Host "❌ Login failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+
+```
+
+5. Create an Order:
+```
+<!-- Check variables and define headers: -->
+if (-not $IdToken -or -not $UserId) { Write-Error "Missing UserId or IdToken! Please ensure Login (Step 2) was successful and returned a valid token."; return }
+Write-Host "Using UserId: $UserId"
+$headers = @{
+    "Authorization" = $IdToken
+    "Content-Type"  = "application/json"
+}
+
+<!-- Define Order Payload: -->
+$createOrderPayload = @{
+    userId = $UserId
+    items = @(
+        @{ productId = "NEWPROD001"; productName = "Fresh Product"; quantity = 2; price = 25.00 },
+        @{ productId = "NEWPROD002"; productName = "Another Item"; quantity = 1; price = 49.50 }
+    )
+    shippingAddress = @{
+        street = "789 New Deploy Ave"
+        city = "CloudNine"
+        zipCode = "11223"
+        country = "DE"
+    }
+} | ConvertTo-Json
+
+<!-- Send Create Order Request: -->
+Write-Host "Attempting to create an order for UserId: $UserId"
+try {
+    $createOrderResponse = Invoke-RestMethod -Uri "$ApiEndpoint/orders" -Method Post -Body $createOrderPayload -Headers $headers -ErrorAction Stop
+    Write-Host "✅ Order creation successful!" -ForegroundColor Green
+    $createOrderResponse | ConvertTo-Json -Depth 3 | Write-Output
+    $OrderId = $createOrderResponse.orderId
+    Write-Host "Created Order ID: $OrderId"
+} catch {
+    Write-Host "❌ Order creation failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+
+```
+
+6.  Get Orders for a User
+```
+<!-- Send Get Orders Request: -->
+if (-not $headers) { Write-Error "Headers not set. Ensure login was successful."; return }
+Write-Host "Attempting to get orders for UserId: $UserId"
+try {
+    $getOrdersResponse = Invoke-RestMethod -Uri "$ApiEndpoint/orders?userId=$UserId" -Method Get -Headers $headers -ErrorAction Stop
+    Write-Host "✅ Get orders successful!" -ForegroundColor Green
+    $getOrdersResponse | ConvertTo-Json -Depth 4 | Write-Output
+} catch {
+    Write-Host "❌ Get orders failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+
+```
+
+7.  Get Order Details by ID
+```
+<!-- Check $OrderId (optional): -->
+if (-not $OrderId) { Write-Error "OrderId not found. Ensure 'Create Order' (Step 3) was successful."; return }
+
+<!-- Send Get Order Details Request: -->
+if (-not $headers) { Write-Error "Headers not set. Ensure login was successful."; return }
+Write-Host "Attempting to get order details for Order ID: $OrderId"
+try {
+    $orderDetailsResponse = Invoke-RestMethod -Uri "$ApiEndpoint/orders/$OrderId" -Method Get -Headers $headers -ErrorAction Stop
+    Write-Host "✅ Get order details successful!" -ForegroundColor Green
+    $orderDetailsResponse | ConvertTo-Json -Depth 4 | Write-Output
+} catch {
+    Write-Host "❌ Get order details failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+```
+8.  Submit Feedback
+```
+<!-- Define Feedback Payload: -->
+if (-not $headers) { Write-Error "Headers not set. Ensure login was successful."; return }
+$feedbackPayload = @{
+    userId = $UserId
+    orderId = $OrderId 
+    rating = 5 
+    comment = "Testing new deployment $(Get-Date) - Feedback function."
+    category = "Deployment Test"
+} | ConvertTo-Json
+
+<!-- Send Submit Feedback Request: -->
+Write-Host "Attempting to submit feedback for UserId: $UserId"
+try {
+    $feedbackResponse = Invoke-RestMethod -Uri "$ApiEndpoint/feedback" -Method Post -Body $feedbackPayload -Headers $headers -ErrorAction Stop
+    Write-Host "✅ Submit feedback successful!" -ForegroundColor Green
+    $feedbackResponse | ConvertTo-Json -Depth 3 | Write-Output
+} catch {
+    Write-Host "❌ Submit feedback failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+
+```
+
+9.  Get Analytics
+```
+<!-- Send Get Analytics Request (Summary): -->
+if (-not $headers) { Write-Error "Headers not set. Ensure login was successful."; return }
+Write-Host "Attempting to get analytics (summary report)"
+try {
+    $analyticsResponse = Invoke-RestMethod -Uri "$ApiEndpoint/analytics" -Method Get -Headers $headers -ErrorAction Stop
+    Write-Host "✅ Get analytics (summary) successful!" -ForegroundColor Green
+    $analyticsResponse | ConvertTo-Json -Depth 4 | Write-Output
+} catch {
+    Write-Host "❌ Get analytics (summary) failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+
+<!-- (Optional) Send Get Analytics Request (Detailed): -->
+if (-not $headers) { Write-Error "Headers not set. Ensure login was successful."; return }
+Write-Host "Attempting to get analytics (detailed report)"
+try {
+    $analyticsDetailedResponse = Invoke-RestMethod -Uri "$ApiEndpoint/analytics?reportType=detailed" -Method Get -Headers $headers -ErrorAction Stop
+    Write-Host "✅ Get analytics (detailed) successful!" -ForegroundColor Green
+    $analyticsDetailedResponse | ConvertTo-Json -Depth 5 | Write-Output
+} catch {
+    Write-Host "❌ Get analytics (detailed) failed!" -ForegroundColor Red
+    Write-Host "Status Code: $($_.Exception.Response.StatusCode.value__)"
+    $_.Exception.Response.GetResponseStream() | ForEach-Object { $reader = New-Object System.IO.StreamReader $_; $reader.ReadToEnd() } | Write-Output
+}
+```
+
 
 ## License
 

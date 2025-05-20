@@ -43,12 +43,15 @@ export const apiRequest = async <T>(
   }
 };
 
+// Import getAuthToken from authService
+import { getAuthToken } from './authService';
+
 // Authenticated API request
 export const authenticatedRequest = async <T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> => {
-  const token = localStorage.getItem('authToken');
+  const token = getAuthToken();
   
   if (!token) {
     throw new Error('Authentication required');

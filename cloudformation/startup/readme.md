@@ -155,10 +155,10 @@ Each Lambda logs the incoming event and returns a placeholder success message. E
 2. **Deploy** with the AWS CLI:
 
    ```bash
-   aws cloudformation deploy \
-     --stack-name startup-backend-stack \
-     --template-file template.yaml \
-     --parameter-overrides ProjectName=MyStartupProj \
+   aws cloudformation deploy `
+     --stack-name startup-backend-stack `
+     --template-file template.yaml `
+     --parameter-overrides ProjectName=MyStartupProj `
      --capabilities CAPABILITY_NAMED_IAM
    ```
 
@@ -170,6 +170,15 @@ Each Lambda logs the incoming event and returns a placeholder success message. E
 
 4. **Attach** triggers (API Gateway, EventBridge, etc.) to your Lambdas as needed.
 
+5. **Test** the Lambdas using the AWS CLI or the AWS Console.
+```
+aws lambda invoke `
+    --function-name MyStartupProj-RegisterUser `
+    --cli-binary-format raw-in-base64-out `
+    --payload '{\"name\": \"Martin\"}' `
+    response.json
+
+```
 ---
 
 ## License
