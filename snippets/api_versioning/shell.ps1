@@ -9,7 +9,7 @@
   Number of requests to send (default 100).
 #>
 param(
-    [string]$ApiUrl = "https://93mvlflaf9.execute-api.eu-central-1.amazonaws.com/v1/hello",
+    [string]$ApiUrl = "",
     [int]   $Count  = 100
 )
 
