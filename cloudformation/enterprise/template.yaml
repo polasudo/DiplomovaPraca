@@ -2444,30 +2444,63 @@ Resources:
     DependsOn: ApiDeployment
     Properties:
       WebACLArn: !GetAtt ApiWebACL.Arn
-
       ResourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${RestApi}/stages/showcase"
-
-  # Inspector assessment (classic) to run on all EC2/Lambda roles
-  InspectorResourceGroup:
-    Type: AWS::Inspector::ResourceGroup
+# working alternative for filter of Inspector v2 findings
+  ProjectInspectorFilter:
+    Type: AWS::InspectorV2::Filter
     Properties:
-      ResourceGroupTags:
-        - Key: Project
-          Value: !Ref ProjectName
+      Name: !Sub "${ProjectName}-OnlyThisStack"
+      Description: "Show Inspector v2 findings only for resources tagged Project=${ProjectName}"
+      FilterCriteria:
+        ResourceTags:
+          - Comparison: EQUALS
+            Key: Project
+            Value: !Ref ProjectName
+      # Action can be FINDINGS (show only these) or SUPPRESS (hide these)
+      FilterAction: SUPPRESS
 
-  InspectorAssessmentTarget:
-    Type: AWS::Inspector::AssessmentTarget
-    Properties:
-      AssessmentTargetName: !Sub "${ProjectName}-InspectorTarget"
-      ResourceGroupArn: !GetAtt InspectorResourceGroup.Arn
+# alternative: weekly scan of the account
+  # WeeklyCiScan:
+  #   Type: AWS::InspectorV2::CisScanConfiguration
+  #   Properties:
+  #     ScanName: !Sub "${ProjectName}-CIS"
+  #     # Sunday 02:00 UTC
+  #     Schedule:
+  #       Weekly:
+  #         Days:
+  #           - SUN
+  #         StartTime:
+  #           TimeOfDay: "02:00"
+  #           TimeZone: "UTC"
+  #     SecurityLevel: LEVEL_1
+  #     Targets:
+  #       AccountIds: 
+  #         - !Sub "${AWS::AccountId}"
+  #       TargetResourceTags:
+  #         - "Project=myProject"
 
-  InspectorAssessmentTemplate:
-    Type: AWS::Inspector::AssessmentTemplate
-    Properties:
-      AssessmentTargetArn: !Ref InspectorAssessmentTarget
-      DurationInSeconds: 3600
-      RulesPackageArns:
-        - arn:aws:inspector:eu-central-1:537503971621:rulespackage/0-wNqHa8M9
+# DEPRECATED SINCE 20.05.2025 
+  # # Inspector assessment (classic) to run on all EC2/Lambda roles
+  # InspectorResourceGroup:
+  #   Type: AWS::Inspector::ResourceGroup
+  #   Properties:
+  #     ResourceGroupTags:
+  #       - Key: Project
+  #         Value: !Ref ProjectName
+
+  # InspectorAssessmentTarget:
+  #   Type: AWS::Inspector::AssessmentTarget
+  #   Properties:
+  #     AssessmentTargetName: !Sub "${ProjectName}-InspectorTarget"
+  #     ResourceGroupArn: !GetAtt InspectorResourceGroup.Arn
+
+  # InspectorAssessmentTemplate:
+  #   Type: AWS::Inspector::AssessmentTemplate
+  #   Properties:
+  #     AssessmentTargetArn: !Ref InspectorAssessmentTarget
+  #     DurationInSeconds: 3600
+  #     RulesPackageArns:
+  #       - arn:aws:inspector:eu-central-1:537503971621:rulespackage/0-wNqHa8M9
 
 
   #############################################
