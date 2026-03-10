@@ -1,7 +1,3 @@
-Absolutely! Here’s a **README.md** for your diploma thesis repository, covering the whole project and connecting all subfolders. This version introduces your motivation, context, structure, and practical usage for new users, contributors, or examiners.
-
----
-
 # Serverless Reference Architectures & Patterns for AWS
 
 ## Overview
